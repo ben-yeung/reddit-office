@@ -11,6 +11,7 @@ import { OfficeStage } from "./OfficeStage";
 import { WorkerModal } from "./WorkerModal";
 import { Hud } from "@/components/ui/Hud";
 import { PolicyPanel } from "@/components/ui/PolicyPanel";
+import { AuthControl } from "@/components/auth/AuthControl";
 import styles from "./OfficeApp.module.css";
 
 interface Selection {
@@ -95,9 +96,12 @@ export function OfficeApp() {
         onSelectWorker={(w) => setSelected({ worker: w, at: Date.now() })}
       />
 
-      <div className={styles.brand}>
-        <span className={`pixel-font ${styles.brandName}`}>REDDIT OFFICE</span>
-        <span className={styles.brandSub}>mock data · live simulation</span>
+      <div className={styles.topRight}>
+        <div className={styles.brand}>
+          <span className={`pixel-font ${styles.brandName}`}>REDDIT OFFICE</span>
+          <span className={styles.brandSub}>demo · top subreddits</span>
+        </div>
+        <AuthControl />
       </div>
 
       <div className={styles.hint}>drag to pan · scroll to zoom · click a worker</div>

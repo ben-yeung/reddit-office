@@ -2,10 +2,11 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
+import { AuthProvider } from "@/lib/auth/AuthContext";
 
 /**
- * App-wide client providers. React Query is wired up now so the real
- * Reddit data layer (iteration 2) can drop in without touching the tree.
+ * App-wide client providers. React Query caches Reddit reads; AuthProvider
+ * tracks demo-vs-authenticated mode (ADR-0008).
  */
 export function Providers({ children }: { children: ReactNode }) {
   const [client] = useState(
@@ -17,5 +18,9 @@ export function Providers({ children }: { children: ReactNode }) {
       }),
   );
 
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={client}>
+      <AuthProvider>{children}</AuthProvider>
+    </QueryClientProvider>
+  );
 }

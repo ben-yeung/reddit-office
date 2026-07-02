@@ -1,5 +1,5 @@
-import { OfficeApp } from "@/components/office/OfficeApp";
+import { AppRoot } from "@/components/AppRoot";
 
 export default function Home() {
-  return <OfficeApp />;
+  return <AppRoot />;
 }

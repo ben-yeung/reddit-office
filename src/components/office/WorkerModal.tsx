@@ -1,7 +1,9 @@
 "use client";
 
+import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import type { Subreddit, Worker } from "@/lib/domain/types";
+import { useDialog } from "@/lib/util/useDialog";
 import styles from "./WorkerModal.module.css";
 
 interface Props {
@@ -53,8 +55,11 @@ function mockComments(worker: Worker): Array<{ author: string; body: string; sco
 export function WorkerModal({ worker, subreddit, now, onClose }: Props) {
   const comments = mockComments(worker);
   const ageMin = Math.max(0, Math.round((now - worker.createdAt) / 60000));
+  const dialogRef = useDialog<HTMLDivElement>(onClose);
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <motion.div
       className={styles.backdrop}
       initial={{ opacity: 0 }}
@@ -63,6 +68,8 @@ export function WorkerModal({ worker, subreddit, now, onClose }: Props) {
       onClick={onClose}
     >
       <motion.div
+        ref={dialogRef}
+        tabIndex={-1}
         className={styles.panel}
         role="dialog"
         aria-modal="true"
@@ -116,6 +123,7 @@ export function WorkerModal({ worker, subreddit, now, onClose }: Props) {
           Open in Reddit ↗
         </a>
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    document.body,
   );
 }
