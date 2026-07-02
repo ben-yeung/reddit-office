@@ -20,6 +20,10 @@ import type {
 
 const DEFAULT_SEED = 20240702;
 
+/** Keep only pulses from roughly the last N events (older ones have long since
+    fired their one-shot animation) so the pulse map stays bounded. */
+const PULSE_RETENTION = 256;
+
 /** A transient, one-shot animation trigger for a worker (bumped per event). */
 export interface Pulse {
   type: WorkerEventType;
@@ -63,7 +67,16 @@ export function useOffice(): OfficeApi {
       onEvent: (e) => {
         seqRef.current += 1;
         const seq = seqRef.current;
-        setPulses((prev) => ({ ...prev, [e.workerId]: { type: e.type, seq } }));
+        // Pulses are transient, one-shot triggers keyed by worker. Retain only
+        // recent entries so this map can't grow unbounded over a long session.
+        setPulses((prev) => {
+          const next: Record<string, Pulse> = {};
+          for (const [id, p] of Object.entries(prev)) {
+            if (id !== e.workerId && seq - p.seq < PULSE_RETENTION) next[id] = p;
+          }
+          next[e.workerId] = { type: e.type, seq };
+          return next;
+        });
       },
     });
   }, []);

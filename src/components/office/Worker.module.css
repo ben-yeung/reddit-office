@@ -1,0 +1,22 @@
+/* Idle "breathing" bob for a seated worker. Driven by CSS (transform only) so it
+   runs on the compositor: N workers bobbing costs no per-frame main-thread time,
+   unlike a JS animation loop per worker. Speed is momentum-driven via --bob-dur. */
+@keyframes worker-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2.2px);
+  }
+}
+
+.bob {
+  animation: worker-bob var(--bob-dur, 1.5s) ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bob {
+    animation: none;
+  }
+}
