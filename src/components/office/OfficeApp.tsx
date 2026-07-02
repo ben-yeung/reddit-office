@@ -90,11 +90,12 @@ export function OfficeApp() {
         onSelectWorker={(w) => setSelected({ worker: w, at: Date.now() })}
       />
 
-      <AuthControl />
-
-      <div className={styles.brand}>
-        <span className={`pixel-font ${styles.brandName}`}>REDDIT OFFICE</span>
-        <span className={styles.brandSub}>demo · top subreddits</span>
+      <div className={styles.topRight}>
+        <div className={styles.brand}>
+          <span className={`pixel-font ${styles.brandName}`}>REDDIT OFFICE</span>
+          <span className={styles.brandSub}>demo · top subreddits</span>
+        </div>
+        <AuthControl />
       </div>
 
       <div className={styles.hint}>drag to pan · scroll to zoom · click a worker</div>

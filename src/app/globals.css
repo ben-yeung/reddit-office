@@ -24,6 +24,16 @@
   padding: 0;
 }
 
+/*
+ * Fluid root type so the UI chrome (brand, panels, HUD, modal) scales cleanly
+ * from small mobile viewports up to 4K. The rem term keeps browser-zoom /
+ * user-font-size accessible; the vw term drives the scaling. Tuned so 1080p
+ * stays ~16px (the design baseline) and 4K (3840px) reaches ~22px.
+ */
+html {
+  font-size: clamp(0.9rem, 0.625rem + 0.31vw, 1.375rem);
+}
+
 html,
 body {
   width: 100%;
