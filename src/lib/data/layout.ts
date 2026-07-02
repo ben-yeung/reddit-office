@@ -27,9 +27,11 @@ interface AmenitySpec {
   h: number;
 }
 
-/** Amenities interspersed among the cubicles, one per grid cell. */
+/** Amenities distributed around the cubicle grid (multiple meeting rooms). */
 const AMENITIES: AmenitySpec[] = [
   { kind: "meeting", w: 240, h: 152 },
+  { kind: "meeting", w: 216, h: 140 },
+  { kind: "meeting", w: 228, h: 148 },
   { kind: "pingpong", w: 152, h: 96 },
   { kind: "lounge", w: 196, h: 128 },
   { kind: "coffee", w: 200, h: 96 },
@@ -75,15 +77,26 @@ export function generateLayout(subreddits: Subreddit[], seed: number): Layout {
   const cy = gH / 2;
   const M = GAP_X; // perimeter margin between grid and amenities
 
-  const side = [
-    (a: AmenitySpec) => ({ x: gW + M, y: cy - a.h / 2 }), // right
-    (a: AmenitySpec) => ({ x: cx - a.w / 2, y: gH + M }), // bottom
-    (a: AmenitySpec) => ({ x: -M - a.w, y: cy - a.h / 2 }), // left
-    (a: AmenitySpec) => ({ x: cx - a.w / 2, y: -M - a.h }), // top
+  // perimeter anchors: four sides + four corners, so amenities spread out.
+  // ax/ay: -1 = before the grid, 0 = centered on it, 1 = after it.
+  const anchors: Array<{ ax: number; ay: number }> = [
+    { ax: 1, ay: 0 }, // right
+    { ax: 0, ay: 1 }, // bottom
+    { ax: -1, ay: 0 }, // left
+    { ax: 0, ay: -1 }, // top
+    { ax: 1, ay: -1 }, // top-right
+    { ax: 1, ay: 1 }, // bottom-right
+    { ax: -1, ay: 1 }, // bottom-left
+    { ax: -1, ay: -1 }, // top-left
   ];
+  const place = (a: AmenitySpec, an: { ax: number; ay: number }): Vec2 => ({
+    x: an.ax === 1 ? gW + M : an.ax === -1 ? -M - a.w : cx - a.w / 2,
+    y: an.ay === 1 ? gH + M : an.ay === -1 ? -M - a.h : cy - a.h / 2,
+  });
+  const placed = shuffled(anchors, rng);
   const amenities: AmenityPlacement[] = shuffled(AMENITIES, rng).map((spec, i) => ({
     kind: spec.kind,
-    position: side[i % side.length](spec),
+    position: place(spec, placed[i % placed.length]),
     size: { w: spec.w, h: spec.h },
   }));
 

@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import type { AmenityPlacement, Layout } from "@/lib/domain/types";
 import { appearanceFor } from "@/lib/worker/appearance";
 import { hashString } from "@/lib/util/rng";
-import { decorPlants, decorWalkers } from "@/lib/office/decor";
+import { decorWalkers } from "@/lib/office/decor";
 import { PersonSprite } from "./WorkerSprite";
 
 /**
@@ -18,16 +18,12 @@ import { PersonSprite } from "./WorkerSprite";
  * the amenities, so they never overlap subreddit cubicles.
  */
 export function Decor({ layout, ambient }: { layout: Layout; ambient: boolean }) {
-  const plants = useMemo(() => decorPlants(layout), [layout]);
   const walkers = useMemo(() => (ambient ? decorWalkers(layout) : []), [layout, ambient]);
 
   return (
     <g className="pixelated">
       {layout.amenities.map((am, i) => (
         <Amenity key={i} placement={am} ambient={ambient} />
-      ))}
-      {plants.map((p, i) => (
-        <Plant key={i} x={p.x} y={p.y} s={p.s} />
       ))}
       {walkers.map((w) => (
         <Walker key={w.seed} x0={w.x0} y0={w.y0} x1={w.x1} y1={w.y1} dur={w.dur} seed={w.seed} />
@@ -91,6 +87,11 @@ function Idler({ x, y, seed }: { x: number; y: number; seed: string }) {
   );
 }
 
+/**
+ * A hallway commuter: fades in at one end of the aisle, walks to the other, and
+ * fades out as if leaving. After a random pause a fresh seeded worker enters
+ * (sometimes from the opposite end), so the aisles feel alive rather than looped.
+ */
 function Walker({
   x0,
   y0,
@@ -106,13 +107,41 @@ function Walker({
   dur: number;
   seed: string;
 }) {
+  const [trip, setTrip] = useState(0);
+  const [rev, setRev] = useState(false);
+  const [s, setS] = useState(seed);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  const from = rev ? { x: x1, y: y1 } : { x: x0, y: y0 };
+  const to = rev ? { x: x0, y: y0 } : { x: x1, y: y1 };
+
   return (
     <motion.g
-      initial={{ x: x0, y: y0 }}
-      animate={{ x: [x0, x1, x0], y: [y0, y1, y0] }}
-      transition={{ duration: dur, repeat: Infinity, ease: "linear" }}
+      key={trip}
+      initial={{ x: from.x, y: from.y, opacity: 0 }}
+      animate={{ x: to.x, y: to.y, opacity: [0, 1, 1, 0] }}
+      transition={{
+        x: { duration: dur, ease: "linear" },
+        y: { duration: dur, ease: "linear" },
+        opacity: { duration: dur, times: [0, 0.12, 0.85, 1], ease: "linear" },
+      }}
+      onAnimationComplete={() => {
+        const delay = 400 + Math.random() * 2600;
+        timer.current = setTimeout(() => {
+          setS(`${seed}-${Math.floor(Math.random() * 1e9)}`);
+          setRev((r) => (Math.random() < 0.5 ? !r : r));
+          setTrip((t) => t + 1);
+        }, delay);
+      }}
     >
-      <PersonSprite appearance={appearanceFor(seed)} color={neut(seed)} />
+      <PersonSprite appearance={appearanceFor(s)} color={neut(s)} />
     </motion.g>
   );
 }

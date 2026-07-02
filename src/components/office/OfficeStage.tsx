@@ -9,7 +9,6 @@ import type {
   WorkersByCubicle,
 } from "@/lib/domain/types";
 import { seatPosition } from "@/lib/data/layout";
-import { officeExtent } from "@/lib/office/decor";
 import { Cubicle } from "./Cubicle";
 import { Worker } from "./Worker";
 import { Decor } from "./Decor";
@@ -44,8 +43,6 @@ export function OfficeStage({
   ambient,
   onSelectWorker,
 }: Props) {
-  const extent = officeExtent(layout);
-
   function isVisible(x: number, y: number, w: number, h: number): boolean {
     const sx0 = camera.x + x * camera.zoom;
     const sy0 = camera.y + y * camera.zoom;
@@ -68,8 +65,15 @@ export function OfficeStage({
       style={{ display: "block" }}
     >
       <defs>
-        {/* solid neutral floor with faint tile seams (no checkerboard) */}
-        <pattern id="floorSeams" width={46} height={46} patternUnits="userSpaceOnUse">
+        {/* solid neutral floor with faint tile seams. patternTransform tracks the
+            camera so the grid pans/zooms with the world -> an infinite floor. */}
+        <pattern
+          id="floorSeams"
+          width={46}
+          height={46}
+          patternUnits="userSpaceOnUse"
+          patternTransform={`translate(${camera.x} ${camera.y}) scale(${camera.zoom})`}
+        >
           <rect width={46} height={46} fill="var(--floor-1)" />
           <path
             d="M46 0 V46 M0 46 H46"
@@ -81,17 +85,11 @@ export function OfficeStage({
         </pattern>
       </defs>
 
-      <g transform={`translate(${camera.x} ${camera.y}) scale(${camera.zoom})`}>
-        {/* office floor */}
-        <rect
-          x={extent.minX}
-          y={extent.minY}
-          width={extent.width}
-          height={extent.height}
-          fill="url(#floorSeams)"
-        />
+      {/* infinite floor: full-viewport background painted with the camera-synced grid */}
+      <rect x={0} y={0} width={viewport.width} height={viewport.height} fill="url(#floorSeams)" />
 
-        {/* amenities + plants (always) and ambient NPCs (gated) */}
+      <g transform={`translate(${camera.x} ${camera.y}) scale(${camera.zoom})`}>
+        {/* amenities (always) and ambient NPCs (gated) */}
         <Decor layout={layout} ambient={ambient} />
 
         {layout.cubicles.map((cubicle) => {

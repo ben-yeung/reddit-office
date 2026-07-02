@@ -62,11 +62,6 @@ export function Cubicle({ cubicle, subreddit, workerCount }: Props) {
         {workerCount}
       </text>
 
-      {/* sticky notes on the wall */}
-      <rect x={214} y={16} width={20} height={20} fill="#f5d442" transform="rotate(-6 224 26)" />
-      <rect x={242} y={16} width={20} height={20} fill="#ff9ec4" transform="rotate(5 252 26)" />
-      <rect x={270} y={16} width={20} height={20} fill="#69c9d0" transform="rotate(-3 280 26)" />
-
       {/* corner plant, tucked in the corner */}
       <rect x={w - 28} y={h - 30} width={12} height={14} fill="#8a5a34" />
       <circle cx={w - 22} cy={h - 34} r={10} fill="var(--plant)" />

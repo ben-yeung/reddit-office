@@ -1,7 +1,6 @@
 import type { Layout } from "@/lib/domain/types";
 import { CELL_W, CELL_H, GAP_X, GAP_Y, gridCols, type Bounds } from "@/lib/data/layout";
 import { CUBICLE_W, CUBICLE_H } from "@/lib/domain/constants";
-import { mulberry32 } from "@/lib/util/rng";
 
 interface Rect {
   x0: number;
@@ -50,30 +49,6 @@ export function officeExtent(layout: Layout, margin = 150): Bounds {
   const maxX = b.maxX + margin;
   const maxY = b.maxY + margin;
   return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
-}
-
-export interface PlantSpot {
-  x: number;
-  y: number;
-  s: number;
-}
-
-/** Potted plants scattered through the aisle gaps (never on a tile). */
-export function decorPlants(layout: Layout): PlantSpot[] {
-  const rng = mulberry32((layout.seed ^ 0x9e3779b9) >>> 0);
-  const b = tileBounds(layout);
-  const blocked = tileRects(layout, 14);
-  const spots: PlantSpot[] = [];
-  let tries = 0;
-  while (spots.length < 14 && tries < 800) {
-    tries++;
-    const x = b.minX + rng() * b.width;
-    const y = b.minY + rng() * b.height;
-    if (blocked.some((r) => x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1)) continue;
-    if (spots.some((p) => Math.hypot(p.x - x, p.y - y) < 80)) continue;
-    spots.push({ x, y, s: 0.7 + rng() * 0.5 });
-  }
-  return spots;
 }
 
 export interface WalkerPath {
