@@ -1,0 +1,148 @@
+/* --- Policy panel (top-left) --- */
+.panel {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: min(240px, calc(100vw - 32px));
+  background: var(--panel);
+  border: 2px solid var(--panel-border);
+  border-radius: 10px;
+  z-index: 20;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+  user-select: none;
+}
+
+.panelHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+}
+.panelTitle {
+  font-family: var(--font-pixel), monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+.collapse {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.collapse:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.panelBody {
+  padding: 4px 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.groupLabel {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-dim);
+}
+
+.segmented {
+  display: flex;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 3px;
+}
+.segment {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: 0.76rem;
+  padding: 6px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.segment:hover {
+  color: var(--ink);
+}
+.segmentOn {
+  background: var(--accent);
+  color: #12141a;
+  font-weight: 700;
+}
+
+.toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+.toggle input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.reset {
+  margin-top: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.reset:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* --- HUD (bottom-right) --- */
+.hud {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 20;
+}
+.hudBtn {
+  width: 42px;
+  height: 42px;
+  border: 2px solid var(--panel-border);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+}
+.hudBtn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.hudFit {
+  font-size: 18px;
+}

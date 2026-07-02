@@ -1,0 +1,126 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { MOCK_SUBREDDITS } from "@/lib/data/subreddits";
+import { generateLayout } from "@/lib/data/layout";
+import { MockDataSource } from "@/lib/data/MockDataSource";
+import { DEFAULT_POLICY } from "@/lib/domain/constants";
+import {
+  loadPersisted,
+  savePersisted,
+  clearPersisted,
+} from "@/lib/persistence/localStore";
+import type {
+  Layout,
+  OfficePolicy,
+  Subreddit,
+  WorkerEventType,
+  WorkersByCubicle,
+} from "@/lib/domain/types";
+
+const DEFAULT_SEED = 20240702;
+
+/** A transient, one-shot animation trigger for a worker (bumped per event). */
+export interface Pulse {
+  type: WorkerEventType;
+  seq: number;
+}
+
+export interface OfficeApi {
+  subreddits: Subreddit[];
+  layout: Layout;
+  workersByCubicle: WorkersByCubicle;
+  pulses: Record<string, Pulse>;
+  policy: OfficePolicy;
+  setPolicy: (next: OfficePolicy) => void;
+  resetLayout: () => void;
+}
+
+/**
+ * Owns the office data lifecycle: resolves the persisted layout/policy, runs the
+ * (mock) DataSource, and surfaces snapshots + per-worker event pulses to React.
+ * The DataSource is created only on the client (timers, Date.now, localStorage).
+ */
+export function useOffice(): OfficeApi {
+  const [layout, setLayout] = useState<Layout>(() =>
+    generateLayout(MOCK_SUBREDDITS, DEFAULT_SEED),
+  );
+  const [policy, setPolicyState] = useState<OfficePolicy>(DEFAULT_POLICY);
+  const [workersByCubicle, setWorkersByCubicle] = useState<WorkersByCubicle>({});
+  const [pulses, setPulses] = useState<Record<string, Pulse>>({});
+
+  const sourceRef = useRef<MockDataSource | null>(null);
+  const seqRef = useRef(0);
+
+  const startSource = useCallback((l: Layout, p: OfficePolicy) => {
+    sourceRef.current?.stop();
+    setWorkersByCubicle({});
+    setPulses({});
+    const src = new MockDataSource(MOCK_SUBREDDITS, l, p);
+    sourceRef.current = src;
+    src.start({
+      onSnapshot: (s) => setWorkersByCubicle(s.workersByCubicle),
+      onEvent: (e) => {
+        seqRef.current += 1;
+        const seq = seqRef.current;
+        setPulses((prev) => ({ ...prev, [e.workerId]: { type: e.type, seq } }));
+      },
+    });
+  }, []);
+
+  // Resolve persisted state and start the source once, on mount.
+  useEffect(() => {
+    const persisted = loadPersisted();
+    const finalLayout = persisted?.layout ?? layout;
+    const finalPolicy = persisted?.policy ?? policy;
+    // One-time hydration of React state from localStorage. This must happen in
+    // an effect (not a lazy initializer) to keep SSR and the first client render
+    // identical and avoid a hydration mismatch on cubicle positions.
+    if (persisted?.layout) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLayout(persisted.layout);
+    }
+    if (persisted?.policy) {
+      setPolicyState(persisted.policy);
+    }
+    savePersisted({ layout: finalLayout, policy: finalPolicy });
+    startSource(finalLayout, finalPolicy);
+    return () => sourceRef.current?.stop();
+    // Intentionally run once; startSource is stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const setPolicy = useCallback(
+    (next: OfficePolicy) => {
+      setPolicyState(next);
+      sourceRef.current?.setPolicy(next);
+      setLayout((currentLayout) => {
+        savePersisted({ layout: currentLayout, policy: next });
+        return currentLayout;
+      });
+    },
+    [],
+  );
+
+  const resetLayout = useCallback(() => {
+    clearPersisted();
+    const seed = Math.floor(Math.random() * 1_000_000_000);
+    const next = generateLayout(MOCK_SUBREDDITS, seed);
+    setLayout(next);
+    setPolicyState((currentPolicy) => {
+      savePersisted({ layout: next, policy: currentPolicy });
+      startSource(next, currentPolicy);
+      return currentPolicy;
+    });
+  }, [startSource]);
+
+  return {
+    subreddits: MOCK_SUBREDDITS,
+    layout,
+    workersByCubicle,
+    pulses,
+    policy,
+    setPolicy,
+    resetLayout,
+  };
+}
