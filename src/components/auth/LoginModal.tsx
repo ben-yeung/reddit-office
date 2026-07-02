@@ -1,7 +1,9 @@
 "use client";
 
+import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/lib/auth/AuthContext";
+import { useDialog } from "@/lib/util/useDialog";
 import { RedditGlyph } from "./RedditGlyph";
 import styles from "./auth.module.css";
 
@@ -16,18 +18,23 @@ interface Props {
  */
 export function LoginModal({ onClose }: Props) {
   const { login, error, authConfigured } = useAuth();
+  const dialogRef = useDialog<HTMLDivElement>(onClose);
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <motion.div
       className={styles.overlay}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      onPointerDown={(e) => {
+      onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <motion.div
+        ref={dialogRef}
+        tabIndex={-1}
         className={styles.card}
         role="dialog"
         aria-modal="true"
@@ -71,6 +78,7 @@ export function LoginModal({ onClose }: Props) {
           </p>
         )}
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    document.body,
   );
 }

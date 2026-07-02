@@ -67,6 +67,10 @@
   padding: 20px;
   background: rgba(6, 7, 11, 0.62);
   backdrop-filter: blur(4px);
+  cursor: default;
+}
+.card:focus {
+  outline: none;
 }
 .card {
   position: relative;
