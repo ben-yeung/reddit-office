@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MOCK_SUBREDDITS } from "@/lib/data/subreddits";
-import { generateLayout } from "@/lib/data/layout";
+import { generateLayout, LAYOUT_VERSION } from "@/lib/data/layout";
 import { MockDataSource } from "@/lib/data/MockDataSource";
 import { DEFAULT_POLICY } from "@/lib/domain/constants";
 import {
@@ -71,17 +71,29 @@ export function useOffice(): OfficeApi {
   // Resolve persisted state and start the source once, on mount.
   useEffect(() => {
     const persisted = loadPersisted();
-    const finalLayout = persisted?.layout ?? layout;
-    const finalPolicy = persisted?.policy ?? policy;
+    // Merge a persisted policy over the defaults so older saves gain new fields
+    // (theme, ambient, any new event toggles).
+    const persistedPolicy = persisted?.policy
+      ? {
+          ...DEFAULT_POLICY,
+          ...persisted.policy,
+          events: { ...DEFAULT_POLICY.events, ...persisted.policy.events },
+        }
+      : null;
+    // Only reuse a persisted layout if it matches the current layout scheme.
+    const persistedLayout =
+      persisted?.layout && persisted.layout.version === LAYOUT_VERSION ? persisted.layout : null;
+    const finalLayout = persistedLayout ?? layout;
+    const finalPolicy = persistedPolicy ?? policy;
     // One-time hydration of React state from localStorage. This must happen in
     // an effect (not a lazy initializer) to keep SSR and the first client render
     // identical and avoid a hydration mismatch on cubicle positions.
-    if (persisted?.layout) {
+    if (persistedLayout) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setLayout(persisted.layout);
+      setLayout(persistedLayout);
     }
-    if (persisted?.policy) {
-      setPolicyState(persisted.policy);
+    if (persistedPolicy) {
+      setPolicyState(persistedPolicy);
     }
     savePersisted({ layout: finalLayout, policy: finalPolicy });
     startSource(finalLayout, finalPolicy);

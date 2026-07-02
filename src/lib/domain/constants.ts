@@ -31,4 +31,6 @@ export const DEFAULT_POLICY: OfficePolicy = {
     surge: true,
     removed: true,
   },
+  theme: "dark",
+  ambient: true,
 };

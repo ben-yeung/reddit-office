@@ -5,7 +5,7 @@ import { AnimatePresence } from "framer-motion";
 import { useOffice } from "@/lib/office/useOffice";
 import { useCamera } from "@/lib/camera/useCamera";
 import { useElementSize } from "@/lib/util/useElementSize";
-import { worldBounds } from "@/lib/data/layout";
+import { officeExtent } from "@/lib/office/decor";
 import type { Worker } from "@/lib/domain/types";
 import { OfficeStage } from "./OfficeStage";
 import { WorkerModal } from "./WorkerModal";
@@ -34,11 +34,16 @@ export function OfficeApp() {
     [office.subreddits],
   );
 
-  // Fit the whole office in view on first paint and whenever the layout changes.
+  // Apply the office theme to <html> so the CSS variables switch.
+  useEffect(() => {
+    document.documentElement.dataset.theme = office.policy.theme;
+  }, [office.policy.theme]);
+
+  // Fit the whole office (grid + commons) in view on first paint and on layout change.
   const fittedSeed = useRef<number | null>(null);
   useEffect(() => {
     if (size.width && size.height && fittedSeed.current !== office.layout.seed) {
-      fitTo(worldBounds(office.layout), size);
+      fitTo(officeExtent(office.layout), size);
       fittedSeed.current = office.layout.seed;
     }
   }, [size, office.layout, fitTo]);
@@ -86,6 +91,7 @@ export function OfficeApp() {
         pulses={office.pulses}
         camera={camera}
         viewport={size}
+        ambient={office.policy.ambient}
         onSelectWorker={(w) => setSelected({ worker: w, at: Date.now() })}
       />
 
@@ -101,7 +107,7 @@ export function OfficeApp() {
       <Hud
         onZoomIn={() => zoomAt(size.width / 2, size.height / 2, 1.25)}
         onZoomOut={() => zoomAt(size.width / 2, size.height / 2, 0.8)}
-        onFit={() => fitTo(worldBounds(office.layout), size)}
+        onFit={() => fitTo(officeExtent(office.layout), size)}
       />
 
       <AnimatePresence>

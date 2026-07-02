@@ -34,3 +34,13 @@ export function pick<T>(rng: Rng, arr: readonly T[]): T {
 export function chance(rng: Rng, p: number): boolean {
   return rng() < p;
 }
+
+/** Deterministic 32-bit hash of a string (FNV-1a), for seeding an Rng from an id. */
+export function hashString(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}

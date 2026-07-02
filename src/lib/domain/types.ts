@@ -14,6 +14,9 @@ export type SourcingRule = "new" | "momentum" | "blend";
 /** The four v1 events a Worker can animate (Office Policy axis 2 toggles these). */
 export type WorkerEventType = "new-post" | "trending" | "surge" | "removed";
 
+/** Office visual theme. */
+export type OfficeTheme = "dark" | "light";
+
 export interface Subreddit {
   /** Reddit fullname-style id, e.g. "t5_2fwo". Mock generates stable ids. */
   id: string;
@@ -86,17 +89,32 @@ export interface OfficeSnapshot {
   workersByCubicle: WorkersByCubicle;
 }
 
-/** User configuration - the two axes plus the whitelist (ADR-0005). */
+/** User configuration - sourcing + event toggles (ADR-0005), theme, and ambient life. */
 export interface OfficePolicy {
   sourcing: SourcingRule;
   events: Record<WorkerEventType, boolean>;
+  /** Visual theme of the office. */
+  theme: OfficeTheme;
+  /** Ambient office life: decorative NPCs + their animations. Furniture stays either way. */
+  ambient: boolean;
 }
 
-/** Persisted office map: which subreddits are cubicles and where they sit. */
+/** A decorative amenity kind placed on the office floor (not a subreddit). */
+export type AmenityKind = "meeting" | "pingpong" | "lounge" | "coffee";
+
+/** A placed amenity: where it sits and how big it is, in world units. */
+export interface AmenityPlacement {
+  kind: AmenityKind;
+  position: Vec2;
+  size: { w: number; h: number };
+}
+
+/** Persisted office map: cubicles and amenities, interspersed on a grid. */
 export interface Layout {
   version: number;
   seed: number;
   cubicles: Cubicle[];
+  amenities: AmenityPlacement[];
 }
 
 /** Pan/zoom viewport state. */
