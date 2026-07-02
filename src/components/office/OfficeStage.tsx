@@ -1,6 +1,5 @@
 "use client";
 
-import { AnimatePresence } from "framer-motion";
 import type {
   Camera,
   Layout,
@@ -8,9 +7,7 @@ import type {
   Worker as WorkerModel,
   WorkersByCubicle,
 } from "@/lib/domain/types";
-import { seatPosition } from "@/lib/data/layout";
-import { Cubicle } from "./Cubicle";
-import { Worker } from "./Worker";
+import { CubicleGroup } from "./CubicleGroup";
 import { Decor } from "./Decor";
 import type { Pulse } from "@/lib/office/useOffice";
 
@@ -26,6 +23,13 @@ interface Props {
 }
 
 const CULL_MARGIN = 120;
+
+/** Below this zoom a worker's idle bob is sub-pixel, so we cull the motion. */
+const MOTION_MIN_ZOOM = 0.25;
+
+/** Stable empty roster so an unpopulated cubicle keeps a constant `workers` ref
+    (a fresh `[]` each render would defeat CubicleGroup's memo). */
+const NO_WORKERS: WorkerModel[] = [];
 
 /**
  * Presentational SVG office world. Applies the camera transform, culls cubicles
@@ -43,6 +47,8 @@ export function OfficeStage({
   ambient,
   onSelectWorker,
 }: Props) {
+  const animate = camera.zoom >= MOTION_MIN_ZOOM;
+
   function isVisible(x: number, y: number, w: number, h: number): boolean {
     const sx0 = camera.x + x * camera.zoom;
     const sy0 = camera.y + y * camera.zoom;
@@ -98,34 +104,18 @@ export function OfficeStage({
           }
           const subreddit = subredditsById[cubicle.subredditId];
           if (!subreddit) return null;
-          const workers = workersByCubicle[cubicle.subredditId] ?? [];
+          const workers = workersByCubicle[cubicle.subredditId] ?? NO_WORKERS;
 
           return (
-            <g
+            <CubicleGroup
               key={cubicle.subredditId}
-              transform={`translate(${cubicle.position.x} ${cubicle.position.y})`}
-            >
-              <Cubicle cubicle={cubicle} subreddit={subreddit} workerCount={workers.length} />
-              <AnimatePresence>
-                {workers.map((worker) => {
-                  const seatWorld = seatPosition(cubicle, worker.seatIndex);
-                  const seat = {
-                    x: seatWorld.x - cubicle.position.x,
-                    y: seatWorld.y - cubicle.position.y,
-                  };
-                  return (
-                    <Worker
-                      key={worker.id}
-                      worker={worker}
-                      seat={seat}
-                      color={subreddit.color}
-                      pulse={pulses[worker.id]}
-                      onSelect={onSelectWorker}
-                    />
-                  );
-                })}
-              </AnimatePresence>
-            </g>
+              cubicle={cubicle}
+              subreddit={subreddit}
+              workers={workers}
+              pulses={pulses}
+              animate={animate}
+              onSelect={onSelectWorker}
+            />
           );
         })}
       </g>

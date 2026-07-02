@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import { useOffice } from "@/lib/office/useOffice";
 import { useCamera } from "@/lib/camera/useCamera";
@@ -34,6 +34,11 @@ export function OfficeApp() {
     () => Object.fromEntries(office.subreddits.map((s) => [s.id, s] as const)),
     [office.subreddits],
   );
+
+  // Stable identity so it doesn't defeat CubicleGroup's memo on every render.
+  const onSelectWorker = useCallback((w: Worker) => {
+    setSelected({ worker: w, at: Date.now() });
+  }, []);
 
   // Apply the office theme to <html> so the CSS variables switch.
   useEffect(() => {
@@ -93,7 +98,7 @@ export function OfficeApp() {
         camera={camera}
         viewport={size}
         ambient={office.policy.ambient}
-        onSelectWorker={(w) => setSelected({ worker: w, at: Date.now() })}
+        onSelectWorker={onSelectWorker}
       />
 
       <div className={styles.topRight}>

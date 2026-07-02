@@ -1,17 +1,20 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, type CSSProperties } from "react";
 import { motion, useAnimationControls } from "framer-motion";
 import type { Vec2, Worker as WorkerModel } from "@/lib/domain/types";
 import type { Pulse } from "@/lib/office/useOffice";
 import { appearanceFor } from "@/lib/worker/appearance";
 import { WorkerSprite } from "./WorkerSprite";
+import styles from "./Worker.module.css";
 
 interface Props {
   worker: WorkerModel;
   seat: Vec2; // cubicle-local seat center
   color: string;
   pulse?: Pulse;
+  /** Whether idle motion runs. Gated off when zoomed too far out to perceive it. */
+  animate: boolean;
   onSelect: (worker: WorkerModel) => void;
 }
 
@@ -29,7 +32,7 @@ function formatScore(n: number): string {
  * momentum-driven bob speed, one-shot Actions (surge pop, trending wobble) from
  * event pulses, and enter/exit animations for new-post arrival and removal.
  */
-export function Worker({ worker, seat, color, pulse, onSelect }: Props) {
+export function Worker({ worker, seat, color, pulse, animate, onSelect }: Props) {
   const sprite = useAnimationControls();
   const fx = useAnimationControls();
   const appearance = useMemo(() => appearanceFor(worker.id), [worker.id]);
@@ -69,9 +72,11 @@ export function Worker({ worker, seat, color, pulse, onSelect }: Props) {
       onPointerDown={(e) => e.stopPropagation()}
       onClick={() => onSelect(worker)}
     >
-      <motion.g
-        animate={{ y: [0, -2.2, 0] }}
-        transition={{ duration: bobDuration, repeat: Infinity, ease: "easeInOut" }}
+      {/* Idle bob: CSS-driven (compositor) instead of a per-worker JS loop, and
+          skipped entirely when zoomed too far out to see it. */}
+      <g
+        className={animate ? styles.bob : undefined}
+        style={animate ? ({ "--bob-dur": `${bobDuration}s` } as CSSProperties) : undefined}
       >
         <motion.g animate={sprite}>
           {/* trending glow (behind the sprite) */}
@@ -125,7 +130,7 @@ export function Worker({ worker, seat, color, pulse, onSelect }: Props) {
             <path d="M -6 6 L 0 -2 L 6 6 Z" fill="var(--accent-soft)" opacity={0.8} />
           </motion.g>
         </motion.g>
-      </motion.g>
+      </g>
     </motion.g>
   );
 }
