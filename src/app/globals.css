@@ -1,21 +1,75 @@
 :root {
   color-scheme: dark;
 
-  /* 8-bit office palette */
-  --floor-a: #23262f;
-  --floor-b: #1d2028;
-  --wall-light: #3a3f4b;
-  --wall-dark: #2a2e38;
-  --desk: #6b4a2b;
-  --desk-light: #8a613a;
-  --ink: #e8eaf0;
-  --ink-dim: #9aa0b0;
-  --accent: #ff4500; /* reddit orange - surge / trending */
+  /* ---- Midnight Office (dark) - default theme ---- */
+  --floor-1: #39404a; /* neutral floor so details contrast */
+  --floor-2: #414954;
+  --walkway: #3a414d;
+  --wall-light: #4a4f5c; /* partition */
+  --wall-hi: #5b616f;
+  --wall-dark: #383c46;
+  --desk: #7a5230;
+  --desk-hi: #96683f;
+  --plant: #4a9d5f;
+  --plant-dark: #2f6f43;
+  --plant-light: #57b06e;
+  --chair: #2b2f37;
+  --metal: #8b93a3;
+  --metal-dark: #6b7280;
+  --monitor: #14161c;
+  --rug: #2a3a44;
+  --rug-stroke: #33505c;
+  --glass-fill: #9fd8ff;
+  --glass-frame: #3a4654;
+  --name-bg: #1e222b;
+
+  --ink: #eef1f6;
+  --ink-dim: #99a1b2;
+  --accent: #ff5a1f; /* surge / trending / handles */
   --accent-soft: #ff7a3c;
-  --new: #4ac26b; /* new post green */
-  --removed: #d23a3a; /* removed red */
+  --new: #46c46a; /* new post */
+  --removed: #e0473f; /* post removed */
+
   --panel: rgba(20, 22, 29, 0.92);
   --panel-border: #3a3f4b;
+  --page-bg: #14171d;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+
+  /* ---- Daylight Office (light) ---- */
+  --floor-1: #eef0ea;
+  --floor-2: #e4e7dd;
+  --walkway: #c7cabd;
+  --wall-light: #c3c7b8;
+  --wall-hi: #d8dbcd;
+  --wall-dark: #a7ab9b;
+  --desk: #b98a5a;
+  --desk-hi: #cfa478;
+  --plant: #4a9d5f;
+  --plant-dark: #2f6f43;
+  --plant-light: #6cbe80;
+  --chair: #9aa08f;
+  --metal: #9aa2ac;
+  --metal-dark: #7c8590;
+  --monitor: #2a2e38;
+  --rug: #cdd6c6;
+  --rug-stroke: #aebba7;
+  --glass-fill: #7fc5f0;
+  --glass-frame: #6f7d8a;
+  --name-bg: #ffffff;
+
+  --ink: #20242c;
+  --ink-dim: #5b6270;
+  --accent: #e8480f; /* deeper so it reads on a light ground */
+  --accent-soft: #ff7a3c;
+  --new: #3aa85a;
+  --removed: #cf3b33;
+
+  --panel: rgba(244, 245, 241, 0.94);
+  --panel-border: #c9ccbf;
+  --page-bg: #eef0ea;
 }
 
 * {
@@ -44,7 +98,7 @@ body {
 }
 
 body {
-  background: var(--floor-b);
+  background: var(--page-bg);
   color: var(--ink);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;

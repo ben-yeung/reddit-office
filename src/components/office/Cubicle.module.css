@@ -1,0 +1,8 @@
+/* Corner-resize brackets reveal when the cubicle is hovered. */
+.handles {
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+.cubicle:hover .handles {
+  opacity: 1;
+}

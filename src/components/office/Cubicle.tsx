@@ -1,4 +1,9 @@
 import type { Cubicle as CubicleModel, Subreddit } from "@/lib/domain/types";
+import styles from "./Cubicle.module.css";
+
+const WALL = 12;
+const HANDLE_M = 5;
+const HANDLE_L = 16;
 
 interface Props {
   cubicle: CubicleModel;
@@ -6,54 +11,90 @@ interface Props {
   workerCount: number;
 }
 
-const WALL = 8;
-
 /**
- * A single subreddit's cubicle, drawn top-down (bird's-eye) in pixel-art:
- * partition walls, a nameplate header, and an occupancy readout. Rendered in
- * cubicle-local coordinates (0..w, 0..h); the stage positions it in the world.
+ * A subreddit's cubicle, drawn top-down (bird's-eye): fabric partition walls, a
+ * nameplate, a floor rug, sticky notes, and corner-resize brackets that reveal on
+ * hover (the affordance for the planned drag-to-resize; ADR-0007). Workers bring
+ * their own desks, so the cubicle stays clear inside.
  */
 export function Cubicle({ cubicle, subreddit, workerCount }: Props) {
   const { w, h } = cubicle.size;
 
   return (
-    <g className="pixelated">
-      {/* floor */}
-      <rect x={0} y={0} width={w} height={h} fill="var(--floor-a)" stroke="var(--wall-dark)" strokeWidth={2} />
+    <g className={`pixelated ${styles.cubicle}`}>
+      {/* floor rug */}
+      <rect x={40} y={70} width={w - 80} height={h - 92} rx={10} fill="var(--rug)" opacity={0.75} />
+      <rect
+        x={52}
+        y={82}
+        width={w - 104}
+        height={h - 116}
+        rx={8}
+        fill="none"
+        stroke="var(--rug-stroke)"
+        strokeWidth={2}
+      />
 
-      {/* partition walls (top / left / right) */}
+      {/* floor edge + partitions */}
+      <rect x={0} y={0} width={w} height={h} fill="none" stroke="var(--floor-2)" strokeWidth={2} />
       <rect x={0} y={0} width={w} height={WALL} fill="var(--wall-light)" />
       <rect x={0} y={0} width={WALL} height={h} fill="var(--wall-light)" />
       <rect x={w - WALL} y={0} width={WALL} height={h} fill="var(--wall-light)" />
-      {/* wall shading */}
-      <rect x={0} y={WALL} width={w} height={2} fill="rgba(0,0,0,0.25)" />
+      <rect x={0} y={0} width={w} height={3} fill="var(--wall-hi)" />
+      <rect x={0} y={WALL - 2} width={w} height={2} fill="var(--wall-dark)" />
 
-      {/* nameplate header */}
-      <rect x={WALL} y={WALL} width={w - WALL * 2} height={34} fill="var(--wall-dark)" />
-      <rect x={WALL + 8} y={WALL + 7} width={9} height={20} fill={subreddit.color} />
-      <text
-        className="pixel-font"
-        x={WALL + 26}
-        y={WALL + 22}
-        fontSize={11}
-        fill="var(--ink)"
-        dominantBaseline="middle"
-      >
+      {/* nameplate */}
+      <rect x={WALL} y={WALL} width={172} height={30} rx={4} fill="var(--name-bg)" />
+      <rect x={WALL + 8} y={WALL + 6} width={9} height={18} fill={subreddit.color} />
+      <text className="pixel-font" x={WALL + 26} y={WALL + 21} fontSize={10} fill="var(--ink)">
         {subreddit.displayName}
       </text>
 
-      {/* occupancy dots */}
+      {/* occupancy */}
       <text
         className="pixel-font"
         x={w - WALL - 10}
-        y={WALL + 22}
+        y={WALL + 21}
         fontSize={9}
         fill="var(--ink-dim)"
         textAnchor="end"
-        dominantBaseline="middle"
       >
         {workerCount}
       </text>
+
+      {/* corner plant, tucked in the corner */}
+      <rect x={w - 28} y={h - 30} width={12} height={14} fill="#8a5a34" />
+      <circle cx={w - 22} cy={h - 34} r={10} fill="var(--plant)" />
+      <circle cx={w - 28} cy={h - 30} r={6} fill="var(--plant-dark)" />
+
+      {/* corner-resize brackets (reveal on hover) */}
+      <g className={styles.handles}>
+        <CornerBrackets w={w} h={h} />
+      </g>
     </g>
+  );
+}
+
+function CornerBrackets({ w, h }: { w: number; h: number }) {
+  const m = HANDLE_M;
+  const L = HANDLE_L;
+  const x0 = m;
+  const y0 = m;
+  const x1 = w - m;
+  const y1 = h - m;
+  const stroke = {
+    fill: "none",
+    stroke: "var(--accent)",
+    strokeWidth: 3,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+  return (
+    <>
+      <path d={`M ${x0} ${y0 + L} L ${x0} ${y0} L ${x0 + L} ${y0}`} {...stroke} />
+      <path d={`M ${x1 - L} ${y0} L ${x1} ${y0} L ${x1} ${y0 + L}`} {...stroke} />
+      <path d={`M ${x0} ${y1 - L} L ${x0} ${y1} L ${x0 + L} ${y1}`} {...stroke} />
+      <path d={`M ${x1 - L} ${y1} L ${x1} ${y1} L ${x1} ${y1 - L}`} {...stroke} />
+    </>
   );
 }
