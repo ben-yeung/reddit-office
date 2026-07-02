@@ -21,6 +21,14 @@ consistently in code, UI copy, and docs. Update as the model sharpens.
 | **Notable** | The criterion that qualifies a post to join/stay in a Roster: a high **Momentum** score. | See Momentum. |
 | **Momentum** | A weighted composite of a post's rates of change - upvotes/min, comments/min, (more TBD) - **normalized per-subreddit** (relative to that sub's own baseline). Ranks posts for Roster inclusion + pruning. | `num_comments` comes free in the `/api/info` batch. See ADR-0005. |
 | **Baseline** | A subreddit's rolling "normal" pace (posts/min, typical score velocity) that Momentum is measured against, so small and large subs are comparable. | Computed from discovery-poll history. |
+| **Demo mode** | The unauthenticated default experience: a curated office rendered from a fixed set of iconic subs, served to every visitor without a Reddit login. | Not token-less - see App-only token. Entry is demo-first (ADR-0008). See ADR-0009. |
+| **Authenticated mode** | The experience after Reddit login: the user's own subscribed subreddits, per-user token and polling. | Reached via the Login modal; enters Onboarding (ADR-0004). See ADR-0008. |
+| **Login modal** | The Lock-style ("Auth0 conventions") centred modal with a "Log in with Reddit" button and a "Continue without logging in" option. | Purely a visual convention - no third-party broker. Opened on demand from the header. See ADR-0008. |
+| **App-only token** | An OAuth token obtained via the `client_credentials` grant that authenticates as the *application*, not a user. Powers Demo mode. | Shared across all demo visitors -> one shared rate-limit bucket. See ADR-0009. |
+| **User token** | The per-user OAuth token from the `authorization_code` flow (`duration=permanent`, with refresh). Powers Authenticated mode. | Lives only in an httpOnly encrypted session cookie, never in the browser. See ADR-0008. |
+| **Session cookie** | The httpOnly, Secure, SameSite=Lax, encrypted cookie the backend sets to hold the User token server-side. | Client never reads it; the proxy does. See ADR-0008. |
+| **Iconic subs** | The curated fixed list (~8-12) of flagship SFW subreddits that become the Demo mode cubicles. | Config module; hand-tuned for a striking, predictable showcase. See ADR-0009. |
+| **Shared demo cache** | Server-side short-TTL cache of the curated subs' data. The server polls Reddit once per interval; all demo clients read the snapshot. | Constant Reddit call volume regardless of visitor count; no DB. See ADR-0009. |
 
 ## Event types (v1 confirmed)
 - **New post arrives** - reliable, cheap.
