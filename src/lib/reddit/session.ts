@@ -21,8 +21,12 @@ export interface Session {
   tokens: UserTokens;
 }
 
-/** Cookie lifetime. Long-lived: the refresh token keeps the session usable. */
-const SESSION_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
+/**
+ * Cookie lifetime. With duration=temporary (ADR-0008) the access token lives
+ * ~1 hour and cannot be refreshed, so the cookie expires with it - after which
+ * the user is cleanly back in demo mode and logs in again.
+ */
+const SESSION_MAX_AGE = 60 * 60; // 1 hour
 
 export function sessionCookieOptions() {
   return {
@@ -56,10 +60,16 @@ export async function clearSession(): Promise<void> {
   (await cookies()).delete(COOKIE.session);
 }
 
+/** Whether a session's token is currently usable (valid, or refreshable). */
+export function isSessionLive(session: Session): boolean {
+  return session.tokens.expiresAt > Date.now() || Boolean(session.tokens.refreshToken);
+}
+
 /**
- * Return a valid user access token, transparently refreshing (and re-persisting
- * the session cookie) when the current token is within 60s of expiry. Returns
- * `null` when there is no session. Throws only if a refresh actively fails.
+ * Return a valid user access token. If the token is within 60s of expiry and a
+ * refresh token exists (duration=permanent), it is refreshed and re-persisted;
+ * with duration=temporary there is no refresh token, so an expired token yields
+ * `null` (the user must log in again). Returns `null` when there is no session.
  */
 export async function getValidUserToken(): Promise<string | null> {
   const session = await readSession();
@@ -69,7 +79,7 @@ export async function getValidUserToken(): Promise<string | null> {
     return session.tokens.accessToken;
   }
   const creds = getCredentials();
-  if (!creds) return null;
+  if (!creds || !session.tokens.refreshToken) return null;
 
   const refreshed = await refreshUserToken(creds, session.tokens.refreshToken);
   await writeSession({ ...session, tokens: refreshed });

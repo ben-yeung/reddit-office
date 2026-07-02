@@ -44,9 +44,13 @@ Because popups are blocked without a user gesture and behave poorly on mobile, t
 - The Reddit **access/refresh token never reaches the browser.** The backend sets an
   **httpOnly, Secure, SameSite=Lax, encrypted session cookie**. The client only ever calls
   our proxy, which reads the cookie server-side. (localStorage is rejected: XSS-exfiltratable.)
-- The authorize request uses **`duration=permanent`** so we receive a **refresh token** and
-  can silently refresh the 1-hour access token - required for the always-open real-time
-  dashboard (ADR-0001).
+- The authorize request uses **`duration=temporary`**: a 1-hour access token and **no
+  refresh token**. This deliberately keeps the consent screen from asking to "maintain
+  access indefinitely" - a friendlier, more privacy-forward prompt for a portfolio piece.
+  The trade-off is that the session ends when the token expires and the user logs in again
+  (accepted over storing a long-lived refresh token). The code still supports a refresh
+  token if this is ever revisited (`getValidUserToken`), so reverting to `permanent` for the
+  always-open dashboard (ADR-0001) needs only the one-line `duration` change.
 - A **`state`** parameter is generated per attempt and verified on callback (CSRF defence).
 - **One registered "web app" credential** (confidential client, secret held server-side per
   ADR-0003) serves both this `authorization_code` flow and the app-only Demo flow (ADR-0009).
@@ -57,6 +61,7 @@ Because popups are blocked without a user gesture and behave poorly on mobile, t
   cost of reliability: blocked/mobile users get the bulletproof redirect flow automatically.
 - Login transitions the user from Demo into **Onboarding** (ADR-0004); the curated demo
   office is ephemeral and discarded on login.
-- Silent refresh keeps a long-open tab authenticated without re-prompting.
+- The session lasts about an hour (the access-token lifetime); after that the user cleanly
+  drops back to demo mode and can log in again.
 - Client-side XSS cannot exfiltrate the Reddit token; the blast radius of a compromised
   client is limited to what the proxy already exposes.

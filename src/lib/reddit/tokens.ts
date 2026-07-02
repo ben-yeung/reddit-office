@@ -22,7 +22,12 @@ interface TokenResponse {
 
 export interface UserTokens {
   accessToken: string;
-  refreshToken: string;
+  /**
+   * Present only when Reddit issued a refresh token (`duration=permanent`).
+   * With `duration=temporary` (ADR-0008) there is none, and the session simply
+   * ends when the access token expires.
+   */
+  refreshToken?: string;
   /** ms epoch when `accessToken` expires. */
   expiresAt: number;
   scope: string;
@@ -39,8 +44,10 @@ export function buildAuthorizeUrl(params: {
   url.searchParams.set("response_type", "code");
   url.searchParams.set("state", params.state);
   url.searchParams.set("redirect_uri", params.redirectUri);
-  // `permanent` yields a refresh token so a long-open tab can silently refresh.
-  url.searchParams.set("duration", "permanent");
+  // `temporary` (ADR-0008): a 1-hour access token and NO refresh token, so the
+  // consent screen does not ask to "maintain access indefinitely". The session
+  // ends when the token expires and the user logs in again.
+  url.searchParams.set("duration", "temporary");
   url.searchParams.set("scope", SCOPE_STRING);
   return url.toString();
 }
@@ -76,9 +83,7 @@ export async function exchangeCode(
     code,
     redirect_uri: redirectUri,
   });
-  if (!data.refresh_token) {
-    throw new Error("Reddit did not return a refresh token (expected duration=permanent)");
-  }
+  // With duration=temporary there is no refresh token; that is expected.
   return {
     accessToken: data.access_token,
     refreshToken: data.refresh_token,
