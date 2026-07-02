@@ -24,7 +24,8 @@ const SEED: Array<{ name: string; color: string }> = [
   { name: "sports", color: "#5fd08a" },
 ];
 
-export const MOCK_SUBREDDITS: Subreddit[] = SEED.map((s, i) => ({
+/** Limited to 9 for now (a 3x3 office); bump the slice to grow the floor later. */
+export const MOCK_SUBREDDITS: Subreddit[] = SEED.slice(0, 9).map((s, i) => ({
   id: `t5_${String(i + 1).padStart(4, "0")}`,
   name: s.name,
   displayName: `r/${s.name}`,

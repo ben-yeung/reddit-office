@@ -1,44 +1,55 @@
 "use client";
 
+import { useMemo } from "react";
 import { motion } from "framer-motion";
+import type { AmenityPlacement, Layout } from "@/lib/domain/types";
 import { appearanceFor } from "@/lib/worker/appearance";
 import { hashString } from "@/lib/util/rng";
+import { decorPlants, decorWalkers } from "@/lib/office/decor";
 import { PersonSprite } from "./WorkerSprite";
 
 /**
- * The shared commons: modern-office amenities (glass meeting room, ping-pong,
- * lounge, coffee bar, greenery) plus ambient office-worker NPCs. Rendered in
- * commons-local coordinates; the stage positions it below the cubicle grid.
+ * The office's decorative layer: modern-office amenities (glass meeting room,
+ * ping-pong, lounge, coffee bar) distributed around the cubicle grid, plants
+ * scattered through the aisle gaps, and ambient office-worker NPCs.
  *
  * Furniture always renders; the NPCs and their animations are gated by `ambient`
- * (the Office Policy "Ambient life" toggle). NPCs live only in this negative
- * space, so they never overlap subreddit cubicles.
+ * (the Office Policy "Ambient life" toggle). NPCs live only in the aisles and at
+ * the amenities, so they never overlap subreddit cubicles.
  */
-export function Decor({ origin, ambient }: { origin: { x: number; y: number }; ambient: boolean }) {
+export function Decor({ layout, ambient }: { layout: Layout; ambient: boolean }) {
+  const plants = useMemo(() => decorPlants(layout), [layout]);
+  const walkers = useMemo(() => (ambient ? decorWalkers(layout) : []), [layout, ambient]);
+
   return (
-    <g transform={`translate(${origin.x},${origin.y})`} className="pixelated">
-      {/* soft ceiling light wash */}
-      {[190, 430, 620].map((cx) => (
-        <ellipse key={cx} cx={cx} cy={150} rx={130} ry={110} fill="#ffffff" opacity={0.04} />
+    <g className="pixelated">
+      {layout.amenities.map((am, i) => (
+        <Amenity key={i} placement={am} ambient={ambient} />
       ))}
-
-      <GlassRoom x={20} y={26} w={240} h={150} ambient={ambient} />
-      <PingPong cx={400} cy={86} ambient={ambient} />
-      <CoffeeBar x={300} y={250} w={200} ambient={ambient} />
-      <Lounge cx={610} cy={120} ambient={ambient} />
-
-      <Plant x={290} y={95} s={1} />
-      <Plant x={700} y={250} s={0.9} />
-      <Plant x={30} y={210} s={0.9} />
-
-      {ambient && (
-        <>
-          <Walker x0={300} y0={210} x1={200} y1={210} dur={10} seed="w1" />
-          <Walker x0={300} y0={40} x1={300} y1={232} dur={12} seed="w2" />
-        </>
-      )}
+      {plants.map((p, i) => (
+        <Plant key={i} x={p.x} y={p.y} s={p.s} />
+      ))}
+      {walkers.map((w) => (
+        <Walker key={w.seed} x0={w.x0} y0={w.y0} x1={w.x1} y1={w.y1} dur={w.dur} seed={w.seed} />
+      ))}
     </g>
   );
+}
+
+function Amenity({ placement, ambient }: { placement: AmenityPlacement; ambient: boolean }) {
+  const { kind, position, size } = placement;
+  const cx = position.x + size.w / 2;
+  const cy = position.y + size.h / 2;
+  switch (kind) {
+    case "meeting":
+      return <GlassRoom x={position.x} y={position.y} w={size.w} h={size.h} ambient={ambient} />;
+    case "pingpong":
+      return <PingPong cx={cx} cy={cy} ambient={ambient} />;
+    case "lounge":
+      return <Lounge cx={cx} cy={cy} ambient={ambient} />;
+    case "coffee":
+      return <CoffeeBar x={position.x} y={position.y + 46} w={size.w} ambient={ambient} />;
+  }
 }
 
 const NEUT = ["#8a90a0", "#9a8f86", "#7f9a8f", "#a0929c", "#8f96a6"];

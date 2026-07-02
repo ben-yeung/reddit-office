@@ -9,7 +9,7 @@ import type {
   WorkersByCubicle,
 } from "@/lib/domain/types";
 import { seatPosition } from "@/lib/data/layout";
-import { officeExtent, commonsOrigin } from "@/lib/office/decor";
+import { officeExtent } from "@/lib/office/decor";
 import { Cubicle } from "./Cubicle";
 import { Worker } from "./Worker";
 import { Decor } from "./Decor";
@@ -91,8 +91,8 @@ export function OfficeStage({
           fill="url(#floorSeams)"
         />
 
-        {/* shared commons (amenities always; NPCs gated by ambient) */}
-        <Decor origin={commonsOrigin(layout)} ambient={ambient} />
+        {/* amenities + plants (always) and ambient NPCs (gated) */}
+        <Decor layout={layout} ambient={ambient} />
 
         {layout.cubicles.map((cubicle) => {
           if (!isVisible(cubicle.position.x, cubicle.position.y, cubicle.size.w, cubicle.size.h)) {

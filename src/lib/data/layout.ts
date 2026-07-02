@@ -1,20 +1,39 @@
-import type { Cubicle, Layout, Subreddit, Vec2 } from "@/lib/domain/types";
-import {
-  CUBICLE_W,
-  CUBICLE_H,
-  SEAT_COLS,
-  SEAT_ROWS,
-} from "@/lib/domain/constants";
+import type {
+  AmenityKind,
+  AmenityPlacement,
+  Cubicle,
+  Layout,
+  Subreddit,
+  Vec2,
+} from "@/lib/domain/types";
+import { CUBICLE_W, CUBICLE_H, SEAT_COLS, SEAT_ROWS } from "@/lib/domain/constants";
 import { mulberry32, type Rng } from "@/lib/util/rng";
 
 /** Bump when the layout scheme changes so stale persisted layouts regenerate. */
-export const LAYOUT_VERSION = 2;
-const GAP_X = 90;
-const GAP_Y = 90;
+export const LAYOUT_VERSION = 4;
+export const GAP_X = 90;
+export const GAP_Y = 90;
+/** Grid cell pitch (a cubicle footprint plus its gap). */
+export const CELL_W = CUBICLE_W + GAP_X;
+export const CELL_H = CUBICLE_H + GAP_Y;
 /** Cubicle inner padding (walls + a header strip for the subreddit name). */
 const PAD_X = 26;
 const PAD_TOP = 52;
 const PAD_BOTTOM = 26;
+
+interface AmenitySpec {
+  kind: AmenityKind;
+  w: number;
+  h: number;
+}
+
+/** Amenities interspersed among the cubicles, one per grid cell. */
+const AMENITIES: AmenitySpec[] = [
+  { kind: "meeting", w: 240, h: 152 },
+  { kind: "pingpong", w: 152, h: 96 },
+  { kind: "lounge", w: 196, h: 128 },
+  { kind: "coffee", w: 200, h: 96 },
+];
 
 function shuffled<T>(arr: readonly T[], rng: Rng): T[] {
   const a = [...arr];
@@ -25,27 +44,50 @@ function shuffled<T>(arr: readonly T[], rng: Rng): T[] {
   return a;
 }
 
+/** Number of grid columns for `count` cubicles (a roughly-square grid). */
+export function gridCols(count: number): number {
+  return Math.ceil(Math.sqrt(count));
+}
+
 /**
- * Generate a clean, grid-aligned office floor. The seed shuffles which subreddit
- * lands in which grid cell (a preview of the planned drag-to-reorder; ADR-0007),
- * while positions stay snapped to the grid. Persisted, so it runs once per office
- * unless reset.
+ * Generate a grid-aligned office floor: subreddit cubicles on a square grid
+ * (3x3 for the default 9), with amenities distributed around the perimeter on
+ * each side - a real floor plan rather than one clump. The seed shuffles both the
+ * subreddit order and which amenity sits on which side (a preview of
+ * drag-to-reorder; ADR-0007). Persisted, so it runs once per office unless reset.
  */
 export function generateLayout(subreddits: Subreddit[], seed: number): Layout {
-  const order = shuffled(subreddits, mulberry32(seed));
-  const cols = Math.ceil(Math.sqrt(order.length));
+  const rng = mulberry32(seed);
+  const order = shuffled(subreddits, rng);
+  const cols = gridCols(order.length);
+  const rows = Math.ceil(order.length / cols);
 
-  const cubicles: Cubicle[] = order.map((sub, i) => {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    return {
-      subredditId: sub.id,
-      position: { x: col * (CUBICLE_W + GAP_X), y: row * (CUBICLE_H + GAP_Y) },
-      size: { w: CUBICLE_W, h: CUBICLE_H },
-    };
-  });
+  const cubicles: Cubicle[] = order.map((sub, i) => ({
+    subredditId: sub.id,
+    position: { x: (i % cols) * CELL_W, y: Math.floor(i / cols) * CELL_H },
+    size: { w: CUBICLE_W, h: CUBICLE_H },
+  }));
 
-  return { version: LAYOUT_VERSION, seed, cubicles };
+  // Cubicle-grid footprint, used to anchor amenities on each side.
+  const gW = (cols - 1) * CELL_W + CUBICLE_W;
+  const gH = (rows - 1) * CELL_H + CUBICLE_H;
+  const cx = gW / 2;
+  const cy = gH / 2;
+  const M = GAP_X; // perimeter margin between grid and amenities
+
+  const side = [
+    (a: AmenitySpec) => ({ x: gW + M, y: cy - a.h / 2 }), // right
+    (a: AmenitySpec) => ({ x: cx - a.w / 2, y: gH + M }), // bottom
+    (a: AmenitySpec) => ({ x: -M - a.w, y: cy - a.h / 2 }), // left
+    (a: AmenitySpec) => ({ x: cx - a.w / 2, y: -M - a.h }), // top
+  ];
+  const amenities: AmenityPlacement[] = shuffled(AMENITIES, rng).map((spec, i) => ({
+    kind: spec.kind,
+    position: side[i % side.length](spec),
+    size: { w: spec.w, h: spec.h },
+  }));
+
+  return { version: LAYOUT_VERSION, seed, cubicles, amenities };
 }
 
 /** World-space center of a given seat slot inside a cubicle. */

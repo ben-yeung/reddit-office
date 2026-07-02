@@ -99,11 +99,22 @@ export interface OfficePolicy {
   ambient: boolean;
 }
 
-/** Persisted office map: which subreddits are cubicles and where they sit. */
+/** A decorative amenity kind placed on the office floor (not a subreddit). */
+export type AmenityKind = "meeting" | "pingpong" | "lounge" | "coffee";
+
+/** A placed amenity: where it sits and how big it is, in world units. */
+export interface AmenityPlacement {
+  kind: AmenityKind;
+  position: Vec2;
+  size: { w: number; h: number };
+}
+
+/** Persisted office map: cubicles and amenities, interspersed on a grid. */
 export interface Layout {
   version: number;
   seed: number;
   cubicles: Cubicle[];
+  amenities: AmenityPlacement[];
 }
 
 /** Pan/zoom viewport state. */
