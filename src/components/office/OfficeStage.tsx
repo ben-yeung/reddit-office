@@ -8,9 +8,11 @@ import type {
   Worker as WorkerModel,
   WorkersByCubicle,
 } from "@/lib/domain/types";
-import { seatPosition, worldBounds } from "@/lib/data/layout";
+import { seatPosition } from "@/lib/data/layout";
+import { officeExtent, commonsOrigin } from "@/lib/office/decor";
 import { Cubicle } from "./Cubicle";
 import { Worker } from "./Worker";
+import { Decor } from "./Decor";
 import type { Pulse } from "@/lib/office/useOffice";
 
 interface Props {
@@ -20,6 +22,7 @@ interface Props {
   pulses: Record<string, Pulse>;
   camera: Camera;
   viewport: { width: number; height: number };
+  ambient: boolean;
   onSelectWorker: (worker: WorkerModel) => void;
 }
 
@@ -28,7 +31,8 @@ const CULL_MARGIN = 120;
 /**
  * Presentational SVG office world. Applies the camera transform, culls cubicles
  * outside the viewport (ADR-0007), and renders each cubicle with its animated
- * worker roster. Pointer/zoom handling lives in OfficeApp.
+ * worker roster plus the shared commons (Decor). Pointer/zoom handling lives in
+ * OfficeApp.
  */
 export function OfficeStage({
   subredditsById,
@@ -37,9 +41,10 @@ export function OfficeStage({
   pulses,
   camera,
   viewport,
+  ambient,
   onSelectWorker,
 }: Props) {
-  const bounds = worldBounds(layout);
+  const extent = officeExtent(layout);
 
   function isVisible(x: number, y: number, w: number, h: number): boolean {
     const sx0 = camera.x + x * camera.zoom;
@@ -63,23 +68,31 @@ export function OfficeStage({
       style={{ display: "block" }}
     >
       <defs>
-        <pattern id="floorTiles" width={48} height={48} patternUnits="userSpaceOnUse">
-          <rect width={48} height={48} fill="var(--floor-b)" />
-          <rect width={24} height={24} fill="var(--floor-a)" />
-          <rect x={24} y={24} width={24} height={24} fill="var(--floor-a)" />
+        {/* solid neutral floor with faint tile seams (no checkerboard) */}
+        <pattern id="floorSeams" width={46} height={46} patternUnits="userSpaceOnUse">
+          <rect width={46} height={46} fill="var(--floor-1)" />
+          <path
+            d="M46 0 V46 M0 46 H46"
+            stroke="var(--floor-2)"
+            strokeWidth={1}
+            opacity={0.5}
+            fill="none"
+          />
         </pattern>
       </defs>
 
       <g transform={`translate(${camera.x} ${camera.y}) scale(${camera.zoom})`}>
         {/* office floor */}
         <rect
-          x={bounds.minX}
-          y={bounds.minY}
-          width={bounds.width}
-          height={bounds.height}
-          fill="url(#floorTiles)"
-          opacity={0.5}
+          x={extent.minX}
+          y={extent.minY}
+          width={extent.width}
+          height={extent.height}
+          fill="url(#floorSeams)"
         />
+
+        {/* shared commons (amenities always; NPCs gated by ambient) */}
+        <Decor origin={commonsOrigin(layout)} ambient={ambient} />
 
         {layout.cubicles.map((cubicle) => {
           if (!isVisible(cubicle.position.x, cubicle.position.y, cubicle.size.w, cubicle.size.h)) {

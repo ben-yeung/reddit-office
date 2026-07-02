@@ -1,7 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import type { OfficePolicy, SourcingRule, WorkerEventType } from "@/lib/domain/types";
+import type {
+  OfficePolicy,
+  OfficeTheme,
+  SourcingRule,
+  WorkerEventType,
+} from "@/lib/domain/types";
 import styles from "./controls.module.css";
 
 interface Props {
@@ -33,6 +38,14 @@ export function PolicyPanel({ policy, onChange, onReset }: Props) {
 
   function toggleEvent(value: WorkerEventType) {
     onChange({ ...policy, events: { ...policy.events, [value]: !policy.events[value] } });
+  }
+
+  function setTheme(theme: OfficeTheme) {
+    onChange({ ...policy, theme });
+  }
+
+  function setAmbient(ambient: boolean) {
+    onChange({ ...policy, ambient });
   }
 
   return (
@@ -78,6 +91,42 @@ export function PolicyPanel({ policy, onChange, onReset }: Props) {
                   <span>{e.label}</span>
                 </label>
               ))}
+            </div>
+          </div>
+
+          <div className={styles.group}>
+            <div className={styles.groupLabel}>Theme</div>
+            <div className={styles.segmented}>
+              <button
+                className={`${styles.segment} ${policy.theme === "dark" ? styles.segmentOn : ""}`}
+                onClick={() => setTheme("dark")}
+              >
+                Midnight
+              </button>
+              <button
+                className={`${styles.segment} ${policy.theme === "light" ? styles.segmentOn : ""}`}
+                onClick={() => setTheme("light")}
+              >
+                Daylight
+              </button>
+            </div>
+          </div>
+
+          <div className={styles.group}>
+            <div className={styles.groupLabel}>Ambient life</div>
+            <div className={styles.segmented}>
+              <button
+                className={`${styles.segment} ${policy.ambient ? styles.segmentOn : ""}`}
+                onClick={() => setAmbient(true)}
+              >
+                On
+              </button>
+              <button
+                className={`${styles.segment} ${!policy.ambient ? styles.segmentOn : ""}`}
+                onClick={() => setAmbient(false)}
+              >
+                Off
+              </button>
             </div>
           </div>
 

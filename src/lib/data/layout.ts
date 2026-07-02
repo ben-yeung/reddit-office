@@ -5,9 +5,10 @@ import {
   SEAT_COLS,
   SEAT_ROWS,
 } from "@/lib/domain/constants";
-import { mulberry32, range } from "@/lib/util/rng";
+import { mulberry32, type Rng } from "@/lib/util/rng";
 
-const LAYOUT_VERSION = 1;
+/** Bump when the layout scheme changes so stale persisted layouts regenerate. */
+export const LAYOUT_VERSION = 2;
 const GAP_X = 90;
 const GAP_Y = 90;
 /** Cubicle inner padding (walls + a header strip for the subreddit name). */
@@ -15,27 +16,31 @@ const PAD_X = 26;
 const PAD_TOP = 52;
 const PAD_BOTTOM = 26;
 
+function shuffled<T>(arr: readonly T[], rng: Rng): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 /**
- * Generate a randomized-but-deterministic office floor: cubicles laid out on a
- * loose grid with a little per-cell jitter so it reads as a hand-arranged
- * office rather than a spreadsheet. Positions are persisted (ADR-0007), so this
- * runs once per office unless the layout is reset.
+ * Generate a clean, grid-aligned office floor. The seed shuffles which subreddit
+ * lands in which grid cell (a preview of the planned drag-to-reorder; ADR-0007),
+ * while positions stay snapped to the grid. Persisted, so it runs once per office
+ * unless reset.
  */
 export function generateLayout(subreddits: Subreddit[], seed: number): Layout {
-  const rng = mulberry32(seed);
-  const cols = Math.ceil(Math.sqrt(subreddits.length));
+  const order = shuffled(subreddits, mulberry32(seed));
+  const cols = Math.ceil(Math.sqrt(order.length));
 
-  const cubicles: Cubicle[] = subreddits.map((sub, i) => {
+  const cubicles: Cubicle[] = order.map((sub, i) => {
     const col = i % cols;
     const row = Math.floor(i / cols);
-    const jitterX = range(rng, -18, 18);
-    const jitterY = range(rng, -18, 18);
     return {
       subredditId: sub.id,
-      position: {
-        x: col * (CUBICLE_W + GAP_X) + jitterX,
-        y: row * (CUBICLE_H + GAP_Y) + jitterY,
-      },
+      position: { x: col * (CUBICLE_W + GAP_X), y: row * (CUBICLE_H + GAP_Y) },
       size: { w: CUBICLE_W, h: CUBICLE_H },
     };
   });
