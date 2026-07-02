@@ -5,7 +5,9 @@ import type { Layout, OfficePolicy } from "@/lib/domain/types";
  * the Office Policy. Kept behind this tiny module so a future per-user store
  * (iteration 2, multi-device) can swap in without touching callers.
  */
-const KEY = "reddit-office:v1";
+// v2: the office subreddit set changed (mock seed -> curated demo subs, ADR-0009),
+// so old persisted layouts reference stale subreddit ids and must be discarded.
+const KEY = "reddit-office:v2";
 
 export interface Persisted {
   layout: Layout;

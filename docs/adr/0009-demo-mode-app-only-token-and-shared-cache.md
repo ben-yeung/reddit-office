@@ -32,9 +32,12 @@ NSFW-adjacent subs. The curated list lives in a single config module.
 
 ### Shared server-side cache
 Because the demo office is the same for everyone, the server **polls Reddit once per interval**
-for the curated subs and **caches the snapshot** (in-memory TTL / Next `unstable_cache` -
-**no database**, consistent with ADR-0003). Every demo client reads that shared snapshot
-rather than triggering its own Reddit calls.
+for the curated subs and **caches the snapshot** using Next's platform-backed **Data Cache /
+`unstable_cache`** (short `revalidate`), **not** a module-level in-memory `Map`. On serverless
+(the Vercel target, ADR-0003) each function instance has its own memory and cold-starts
+independently, so an in-memory cache would be per-instance and defeat the purpose; the Data
+Cache is shared across invocations. This stays **DB-free**, consistent with ADR-0003. Every
+demo client reads that shared snapshot rather than triggering its own Reddit calls.
 
 Consequences of this shape:
 - Reddit call volume is **constant regardless of concurrent visitor count** - the demo

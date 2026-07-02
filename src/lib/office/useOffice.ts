@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { MOCK_SUBREDDITS } from "@/lib/data/subreddits";
+import { CURATED_SUBREDDITS } from "@/lib/data/curatedSubreddits";
 import { generateLayout } from "@/lib/data/layout";
-import { MockDataSource } from "@/lib/data/MockDataSource";
+import { RedditDemoDataSource } from "@/lib/data/RedditDemoDataSource";
 import { DEFAULT_POLICY } from "@/lib/domain/constants";
 import {
   loadPersisted,
@@ -43,20 +43,20 @@ export interface OfficeApi {
  */
 export function useOffice(): OfficeApi {
   const [layout, setLayout] = useState<Layout>(() =>
-    generateLayout(MOCK_SUBREDDITS, DEFAULT_SEED),
+    generateLayout(CURATED_SUBREDDITS, DEFAULT_SEED),
   );
   const [policy, setPolicyState] = useState<OfficePolicy>(DEFAULT_POLICY);
   const [workersByCubicle, setWorkersByCubicle] = useState<WorkersByCubicle>({});
   const [pulses, setPulses] = useState<Record<string, Pulse>>({});
 
-  const sourceRef = useRef<MockDataSource | null>(null);
+  const sourceRef = useRef<RedditDemoDataSource | null>(null);
   const seqRef = useRef(0);
 
   const startSource = useCallback((l: Layout, p: OfficePolicy) => {
     sourceRef.current?.stop();
     setWorkersByCubicle({});
     setPulses({});
-    const src = new MockDataSource(MOCK_SUBREDDITS, l, p);
+    const src = new RedditDemoDataSource(CURATED_SUBREDDITS, l, p);
     sourceRef.current = src;
     src.start({
       onSnapshot: (s) => setWorkersByCubicle(s.workersByCubicle),
@@ -105,7 +105,7 @@ export function useOffice(): OfficeApi {
   const resetLayout = useCallback(() => {
     clearPersisted();
     const seed = Math.floor(Math.random() * 1_000_000_000);
-    const next = generateLayout(MOCK_SUBREDDITS, seed);
+    const next = generateLayout(CURATED_SUBREDDITS, seed);
     setLayout(next);
     setPolicyState((currentPolicy) => {
       savePersisted({ layout: next, policy: currentPolicy });
@@ -115,7 +115,7 @@ export function useOffice(): OfficeApi {
   }, [startSource]);
 
   return {
-    subreddits: MOCK_SUBREDDITS,
+    subreddits: CURATED_SUBREDDITS,
     layout,
     workersByCubicle,
     pulses,
