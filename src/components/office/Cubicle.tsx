@@ -1,9 +1,21 @@
+import { useLayoutEffect, useRef, useState } from "react";
 import type { Cubicle as CubicleModel, Subreddit } from "@/lib/domain/types";
 import styles from "./Cubicle.module.css";
 
 const WALL = 12;
 const HANDLE_M = 5;
 const HANDLE_L = 16;
+
+/** Nameplate geometry: where the label text starts and how much room to leave. */
+const NAME_TEXT_X = WALL + 26; // after the wall + color chip
+const NAME_PAD_R = 10; // breathing room between the text and the plate's right edge
+const NAME_FONT = 10;
+/**
+ * Fixed-width fallback per glyph (Press Start 2P is monospaced) used for the very
+ * first paint, before the real `getComputedTextLength` measurement lands. Keeps
+ * the plate from visibly resizing on hydration.
+ */
+const NAME_CHAR_W = 10.5;
 
 interface Props {
   cubicle: CubicleModel;
@@ -19,6 +31,18 @@ interface Props {
  */
 export function Cubicle({ cubicle, subreddit, workerCount }: Props) {
   const { w, h } = cubicle.size;
+
+  // Size the nameplate to the label so it hugs the text at any length (short
+  // names don't leave dead space, long ones like r/NatureIsFuckingLit don't
+  // overflow). Start from a monospaced estimate for SSR/first paint, then snap
+  // to the exact rendered width once the text node is measurable.
+  const labelRef = useRef<SVGTextElement>(null);
+  const [textW, setTextW] = useState(() => subreddit.displayName.length * NAME_CHAR_W);
+  useLayoutEffect(() => {
+    const node = labelRef.current;
+    if (node) setTextW(node.getComputedTextLength());
+  }, [subreddit.displayName]);
+  const plateW = NAME_TEXT_X - WALL + textW + NAME_PAD_R;
 
   return (
     <g className={`pixelated ${styles.cubicle}`}>
@@ -44,9 +68,16 @@ export function Cubicle({ cubicle, subreddit, workerCount }: Props) {
       <rect x={0} y={WALL - 2} width={w} height={2} fill="var(--wall-dark)" />
 
       {/* nameplate */}
-      <rect x={WALL} y={WALL} width={172} height={30} rx={4} fill="var(--name-bg)" />
+      <rect x={WALL} y={WALL} width={plateW} height={30} rx={4} fill="var(--name-bg)" />
       <rect x={WALL + 8} y={WALL + 6} width={9} height={18} fill={subreddit.color} />
-      <text className="pixel-font" x={WALL + 26} y={WALL + 21} fontSize={10} fill="var(--ink)">
+      <text
+        ref={labelRef}
+        className="pixel-font"
+        x={NAME_TEXT_X}
+        y={WALL + 21}
+        fontSize={NAME_FONT}
+        fill="var(--ink)"
+      >
         {subreddit.displayName}
       </text>
 

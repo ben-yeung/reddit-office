@@ -23,7 +23,20 @@ export type OfficeTheme = "dark" | "light";
  * - "image": the image is the content; body is usually empty.
  * - "link": an outbound link with a preview image + domain.
  */
-export type PostKind = "text" | "image" | "link";
+export type PostKind = "text" | "image" | "link" | "video";
+
+/** A Reddit-hosted (v.redd.it) video's playable sources and intrinsic size. */
+export interface PostVideo {
+  /** HLS playlist (audio + adaptive quality); preferred source when present. */
+  hls?: string;
+  /** Progressive MP4 fallback (often video-only) for browsers without HLS. */
+  fallback: string;
+  /** Intrinsic pixel dimensions, used to reserve the correct aspect ratio. */
+  width: number;
+  height: number;
+  /** Whether the source carries an audio track. */
+  hasAudio: boolean;
+}
 
 export interface Subreddit {
   /** Reddit fullname-style id, e.g. "t5_2fwo". Mock generates stable ids. */
@@ -58,6 +71,8 @@ export interface Worker {
   kind: PostKind;
   /** Preview/content image URL for "image" and "link" posts, when available. */
   image?: string;
+  /** Playable sources for "video" posts (v.redd.it), when available. */
+  video?: PostVideo;
   /** External domain for "link" posts, e.g. "themirror.com". */
   linkDomain?: string;
   /** Optional flair label rendered as a pill, e.g. "article", "OC". */
