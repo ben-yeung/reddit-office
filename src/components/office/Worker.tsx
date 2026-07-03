@@ -1,16 +1,29 @@
 "use client";
 
-import { useEffect, useMemo, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useMemo, type CSSProperties } from "react";
 import { motion, useAnimationControls } from "framer-motion";
 import type { Cubicle as CubicleModel, Vec2, Worker as WorkerModel } from "@/lib/domain/types";
 import type { Bounds } from "@/lib/data/layout";
 import type { WorkerAppearance } from "@/lib/worker/appearance";
 import type { Pulse } from "@/lib/office/useOffice";
-import { walkIn, walkOut } from "@/lib/office/walkout";
+import { walkBetween, walkOut } from "@/lib/office/walkout";
 import { WorkerDesk, WorkerBody } from "./WorkerSprite";
 import styles from "./Worker.module.css";
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+// The migration walk must position the worker at its old desk before the browser
+// paints the reshuffled layout, so it runs in a layout effect. Fall back to a
+// passive effect on the server, where layout effects don't run (and there's no
+// migration anyway).
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
+/** A worker's old cubicle position + a monotonic id, set for one shuffle relayout
+    so each worker walks from its previous desk to its new one. */
+export interface Migration {
+  fromPos: Vec2;
+  seq: number;
+}
 
 function formatScore(n: number): string {
   if (n >= 10_000) return `${(n / 1000).toFixed(0)}k`;
@@ -68,18 +81,20 @@ interface Props {
   pulse?: Pulse;
   /** Whether idle motion runs. Gated off when zoomed too far out to perceive it. */
   animate: boolean;
-  /** True for workers mounting during a post-shuffle arrival: they walk in from
-      the grid edge to their new seat instead of appearing at the desk. */
-  enter: boolean;
+  /** Set for one shuffle relayout: the worker walks from its old desk to this new
+      one. Same worker, same subreddit - only the cubicle's grid cell changed. */
+  migration: Migration | null;
   onSelect: (worker: WorkerModel) => void;
 }
 
 /**
  * The person half of a post-as-worker: fades in on the seat (sitting down at the
  * desk fixture behind it) and, on replacement, walks the aisles out to the grid
- * edge before fading. This layer also adds behavior - trending glow, momentum-
- * driven bob speed, and one-shot Actions (surge pop, trending wobble) from event
- * pulses. The desk is a separate layer (WorkerDeskSlot) and stays put.
+ * edge before fading. On a shuffle relayout it instead walks the aisles from its
+ * old desk to its new one (the cubicle jumps to its new cell; the worker migrates
+ * across). This layer also adds behavior - trending glow, momentum-driven bob
+ * speed, and one-shot Actions (surge pop, trending wobble) from event pulses. The
+ * desk is a separate layer (WorkerDeskSlot) and stays put.
  */
 export function Worker({
   worker,
@@ -90,44 +105,40 @@ export function Worker({
   color,
   pulse,
   animate,
-  enter,
+  migration,
   onSelect,
 }: Props) {
   const sprite = useAnimationControls();
   const fx = useAnimationControls();
-  const enterCtl = useAnimationControls();
+  const migrateCtl = useAnimationControls();
 
-  // A worker that mounts during the post-shuffle arrival window walks in from the
-  // grid edge to its seat; everyone else just appears at the desk. `walkIn` is
-  // deterministic per id, so this memo returns stable values across re-renders and
-  // the entrance never re-triggers on a pulse. The travel lives on an inner group
-  // (below) so the outer group's declarative enter/exit/opacity stay untouched -
-  // and the exit walk-out still works normally.
-  const enterWalk = useMemo(
-    () => (enter && animate ? walkIn(worker.id, seat, cubicle, bounds) : null),
-    [enter, animate, worker.id, seat, cubicle, bounds],
-  );
-  // The inner group's offset is the walk path expressed relative to the seat, so
-  // it ends at (0,0) - dead on the seat the outer group already sits at. Only read
-  // on mount (framer ignores `initial` afterwards).
-  const enterInitial = enterWalk
-    ? { x: enterWalk.x[0] - seat.x, y: enterWalk.y[0] - seat.y }
-    : { x: 0, y: 0 };
-
-  useEffect(() => {
-    // Captures the mount-time entrance walk; runs once so arriving workers play it
-    // a single time and later re-renders can't restart or cancel it.
-    if (!enterWalk) return;
-    enterCtl.start({
-      x: enterWalk.x.map((x) => x - seat.x),
-      y: enterWalk.y.map((y) => y - seat.y),
+  // On a shuffle the cubicle jumps to its new cell (CubicleGroup positions it), so
+  // this worker would otherwise pop straight to the new desk. Instead we drive an
+  // inner group (below) from the old desk to the new one along the aisles: snap it
+  // to the old-desk offset before paint, then animate the offset back to (0,0).
+  // Keyed on the migration seq so it fires exactly once per shuffle and never on a
+  // plain re-render (pulse/snapshot). The offset lives on its own group so the
+  // outer group's declarative enter/exit/opacity - including the walk-out - are
+  // untouched.
+  useIsomorphicLayoutEffect(() => {
+    if (!migration || !animate) return;
+    const move = walkBetween(worker.id, seat, migration.fromPos, cubicle.position);
+    if (!move) return;
+    // Offsets are already relative to the new seat; start at the old desk (first
+    // keyframe) and walk back to (0,0). `set` before `start` pins the old position
+    // pre-paint so there's no one-frame flash at the new desk.
+    migrateCtl.set({ x: move.x[0], y: move.y[0] });
+    migrateCtl.start({
+      x: move.x,
+      y: move.y,
       transition: {
-        x: { duration: enterWalk.duration, times: enterWalk.times, ease: "linear" },
-        y: { duration: enterWalk.duration, times: enterWalk.times, ease: "linear" },
+        x: { duration: move.duration, times: move.times, ease: "linear" },
+        y: { duration: move.duration, times: move.times, ease: "linear" },
       },
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // Fires only when the shuffle seq changes - not on the seat/cubicle refs that
+    // churn on every snapshot - so a walk can't be restarted mid-stride.
+  }, [migration?.seq]);
 
   // On removal/replacement the body gets up, steps out through the cubicle's open
   // bottom, and strolls the aisles to the grid edge before fading. Deterministic
@@ -185,11 +196,11 @@ export function Worker({
       onPointerDown={(e) => e.stopPropagation()}
       onClick={() => onSelect(worker)}
     >
-      {/* Arrival walk-in: on a shuffle, an incoming worker starts at the grid edge
-          (enterInitial offset) and strolls to its seat (offset -> 0). A no-op for
-          everyone else. Kept on its own group so the outer group's enter/exit is
-          undisturbed. */}
-      <motion.g initial={enterInitial} animate={enterCtl}>
+      {/* Shuffle migration: an inner offset group. Normally at (0,0) - dead on the
+          seat. On a shuffle it's snapped to the old-desk offset and animated back
+          to (0,0), walking the worker across the floor. Kept separate so the outer
+          group's enter/exit (incl. the walk-out) is undisturbed. */}
+      <motion.g initial={{ x: 0, y: 0 }} animate={migrateCtl}>
         {/* Idle bob: CSS-driven (compositor) instead of a per-worker JS loop, and
             skipped when zoomed too far out to see it. Only the person bobs. */}
         <g

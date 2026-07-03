@@ -111,7 +111,7 @@ export function OfficeApp() {
         viewport={size}
         ambient={office.policy.ambient}
         paused={freezeBackground}
-        arriving={office.arriving}
+        migration={office.migration}
         onSelectWorker={onSelectWorker}
       />
 

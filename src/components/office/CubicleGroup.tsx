@@ -1,11 +1,11 @@
 import { memo } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import type { Cubicle as CubicleModel, Subreddit, Worker as WorkerModel } from "@/lib/domain/types";
 import type { Pulse } from "@/lib/office/useOffice";
 import { seatPosition, type Bounds } from "@/lib/data/layout";
 import { appearanceFor } from "@/lib/worker/appearance";
 import { Cubicle } from "./Cubicle";
-import { Worker, WorkerDeskSlot } from "./Worker";
+import { Worker, WorkerDeskSlot, type Migration } from "./Worker";
 
 interface Props {
   cubicle: CubicleModel;
@@ -15,8 +15,9 @@ interface Props {
   /** Cubicle-grid perimeter a departing worker walks out to before fading. */
   bounds: Bounds;
   animate: boolean;
-  /** True during a post-shuffle arrival: new workers walk in from the grid edge. */
-  enter: boolean;
+  /** Set for one shuffle relayout: this cubicle's old position (+ seq), so its
+      workers walk from their old desks to the new ones. Null when not migrating. */
+  migration: Migration | null;
   onSelect: (worker: WorkerModel) => void;
 }
 
@@ -37,7 +38,7 @@ function CubicleGroupInner({
   pulses,
   bounds,
   animate,
-  enter,
+  migration,
   onSelect,
 }: Props) {
   // Precompute each worker's local seat + appearance once, shared by both layers.
@@ -54,15 +55,10 @@ function CubicleGroupInner({
   });
 
   return (
-    // Positioned via animatable x/y (not a static transform) so that on a shuffle
-    // - once the old roster has walked out - the empty cubicle slides to its new
-    // grid cell instead of teleporting. `initial={false}` skips this on first
-    // paint; between data snapshots the position is unchanged, so it's inert.
-    <motion.g
-      initial={false}
-      animate={{ x: cubicle.position.x, y: cubicle.position.y }}
-      transition={{ duration: 0.7, ease: "easeInOut" }}
-    >
+    // The cubicle (walls, header, desks) is placed by a static transform: on a
+    // shuffle it jumps straight to its new grid cell to "show the destination",
+    // and each worker walks the aisles over to it (see Worker's migration).
+    <g transform={`translate(${cubicle.position.x} ${cubicle.position.y})`}>
       <Cubicle cubicle={cubicle} subreddit={subreddit} workerCount={workers.length} />
 
       {/* Desk fixtures, drawn behind every body so a newly-seated worker sits in
@@ -94,12 +90,12 @@ function CubicleGroupInner({
             color={subreddit.color}
             pulse={pulses[worker.id]}
             animate={animate}
-            enter={enter}
+            migration={migration}
             onSelect={onSelect}
           />
         ))}
       </AnimatePresence>
-    </motion.g>
+    </g>
   );
 }
 
