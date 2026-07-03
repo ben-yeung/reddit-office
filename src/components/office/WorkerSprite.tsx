@@ -128,7 +128,7 @@ function DeskProp({ prop, shirtColor }: { prop: DeskPropType; shirtColor: string
   }
 }
 
-function Head({ a }: { a: WorkerAppearance }) {
+export function Head({ a }: { a: WorkerAppearance }) {
   const hy = HEAD_Y;
   const r = HEAD_R;
   const hatted = a.style === "beanie" || a.style === "noogler";
