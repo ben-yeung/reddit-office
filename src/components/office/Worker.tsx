@@ -126,8 +126,8 @@ export function Worker({
   // pre-paint (framer applies `initial` on mount), then the effect walks it to the
   // seat. A no-op for anyone not arriving.
   const enterWalk = useMemo(
-    () => (enter && animate ? walkIn(worker.id, seat, cubicle) : null),
-    [enter, animate, worker.id, seat, cubicle],
+    () => (enter && animate ? walkIn(worker.id, seat, cubicle, bounds) : null),
+    [enter, animate, worker.id, seat, cubicle, bounds],
   );
   const enterInitial = enterWalk ? { x: enterWalk.x[0], y: enterWalk.y[0] } : { x: 0, y: 0 };
 
