@@ -17,6 +17,17 @@ export const WALKOUT_MAX_S = 4.5;
 export const MIGRATE_MIN_S = 2;
 export const MIGRATE_MAX_S = 4.5;
 
+/** Walk-in pace bounds (seconds). Arrivals spawn just outside their own cubicle
+ *  and step in, so it's a short stroll - not the long cross-grid walk a walk-out
+ *  reversed would be. */
+const WALKIN_MIN_S = 0.9;
+const WALKIN_MAX_S = 2.2;
+
+/** How far along the doorway hallway an arriving worker spawns from its seat
+ *  (world px, either side). Kept to about half a grid cell so workers appear
+ *  right outside their cubicle rather than across the floor. */
+const WALKIN_SPAWN_REACH = CELL_W * 0.5;
+
 /** Fraction of the walk after which the worker starts fading out (fades over the
  *  final stretch as it reaches the edge, like the ambient hallway NPCs). */
 const FADE_START = 0.82;
@@ -150,26 +161,39 @@ export function walkOut(id: string, seat: Vec2, cubicle: Cubicle, bounds: Bounds
 }
 
 /**
- * An arriving worker's entrance walk - the mirror image of {@link walkOut}. The
- * worker comes in from a random edge of the cubicle grid and strolls the aisles
- * to its seat, so when the office first loads (or refills after being empty) the
- * roster files in from the hallways rather than popping in at the desks. Returned
- * as offsets relative to the seat (final keyframe (0,0)), ready to drive an inner
- * group nested at the seat; the fade-in is handled by the worker's mount opacity.
+ * An arriving worker's entrance walk. The worker spawns just outside its own
+ * cubicle - a short way along the doorway hallway (the horizontal aisle below the
+ * cubicle) - strolls to below its seat and steps up into it. So when the office
+ * first loads (or refills after being empty) the roster files in from the nearby
+ * hallway rather than popping in at the desks or trekking across the whole grid.
  *
- * Same deterministic route as the exit (reversed), so a walk-in reads as the
- * reverse of a walk-out.
+ * Returned as offsets relative to the seat (final keyframe (0,0)), ready to drive
+ * an inner group nested at the seat; the fade-in is handled by the worker's mount
+ * opacity. Deterministic per post id (spawn offset + lane), so roster-mates fan
+ * out and the path is stable across the re-renders driven while it plays.
  */
-export function walkIn(id: string, seat: Vec2, cubicle: Cubicle, bounds: Bounds): WalkMove {
-  // Reverse the seat -> edge route so it runs edge -> seat.
-  const pts = aislePath(id, seat, cubicle, bounds).reverse();
-  const seatWorld = { x: cubicle.position.x + seat.x, y: cubicle.position.y + seat.y };
+export function walkIn(id: string, seat: Vec2, cubicle: Cubicle): WalkMove {
+  const rng = mulberry32(hashString(id) ^ 0x27d4eb2f);
+  const pos = cubicle.position;
+  const row = Math.round(pos.y / CELL_H);
+
+  // The doorway hallway just below the cubicle, with a small per-worker lane.
+  const aisleY = (row + 1) * CELL_H - GAP_Y / 2 + range(rng, -GAP_Y * 0.22, GAP_Y * 0.22);
+  const seatWorld = { x: pos.x + seat.x, y: pos.y + seat.y };
+  // Spawn a short way along that hallway from the seat, then walk in.
+  const spawnX = seatWorld.x + range(rng, -WALKIN_SPAWN_REACH, WALKIN_SPAWN_REACH);
+
+  // Appear in the aisle -> stroll along it to below the seat -> step up into it.
+  const raw: Vec2[] = [{ x: spawnX, y: aisleY }, { x: seatWorld.x, y: aisleY }, seatWorld];
+  // Drop a zero-length leg if the spawn happened to land under the seat.
+  const pts = raw.filter((p, i) => i === 0 || p.x !== raw[i - 1].x || p.y !== raw[i - 1].y);
+
   const { times, total } = cumulativeTimes(pts);
   return {
     x: pts.map((p) => p.x - seatWorld.x),
     y: pts.map((p) => p.y - seatWorld.y),
     times,
-    duration: clamp(total / WALK_PX_PER_S, WALKOUT_MIN_S, WALKOUT_MAX_S),
+    duration: clamp(total / WALK_PX_PER_S, WALKIN_MIN_S, WALKIN_MAX_S),
   };
 }
 

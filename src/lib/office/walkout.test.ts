@@ -118,23 +118,24 @@ function inWorld(w: ReturnType<typeof walkIn>, i: number): Vec2 {
 
 describe("walkIn", () => {
   it("ends exactly on the seat", () => {
-    const w = walkIn("t3_abc", SEAT, CUBICLE, BOUNDS);
+    const w = walkIn("t3_abc", SEAT, CUBICLE);
     expect(w.x[w.x.length - 1]).toBe(0); // seat-relative offset (0,0)
     expect(w.y[w.y.length - 1]).toBe(0);
   });
 
-  it("starts from a world edge (comes in from the hallway)", () => {
-    const start = inWorld(walkIn("t3_abc", SEAT, CUBICLE, BOUNDS), 0);
-    const onEdge =
-      Math.abs(start.x - BOUNDS.minX) < 1e-6 ||
-      Math.abs(start.x - BOUNDS.maxX) < 1e-6 ||
-      Math.abs(start.y - BOUNDS.minY) < 1e-6 ||
-      Math.abs(start.y - BOUNDS.maxY) < 1e-6;
-    expect(onEdge).toBe(true);
+  it("spawns just outside its own cubicle, not across the grid", () => {
+    // Every worker should appear within about a grid cell of its seat (in the
+    // doorway hallway), never out at the grid perimeter like a reversed walk-out.
+    for (const id of ["t3_a", "t3_b", "t3_c", "t3_d", "t3_e", "t3_f", "t3_g", "t3_h"]) {
+      const start = inWorld(walkIn(id, SEAT, CUBICLE), 0);
+      const seatWorld = { x: CUBICLE.position.x + SEAT.x, y: CUBICLE.position.y + SEAT.y };
+      expect(Math.hypot(start.x - seatWorld.x, start.y - seatWorld.y)).toBeLessThan(CELL_W);
+      expect(start.y).toBeGreaterThan(seatWorld.y); // comes from the aisle below
+    }
   });
 
   it("steps up into the seat from directly below (through the open bottom)", () => {
-    const w = walkIn("t3_abc", SEAT, CUBICLE, BOUNDS);
+    const w = walkIn("t3_abc", SEAT, CUBICLE);
     const n = w.x.length;
     expect(w.x[n - 2]).toBe(0); // straight up: same x as the seat
     expect(w.y[n - 2]).toBeGreaterThan(0); // arrives from the aisle below
@@ -142,7 +143,7 @@ describe("walkIn", () => {
 
   it("routes Manhattan along the aisles - every leg is axis-aligned", () => {
     for (const id of ["t3_a", "t3_b", "t3_c", "t3_d", "t3_e", "t3_f", "t3_g", "t3_h"]) {
-      const w = walkIn(id, SEAT, CUBICLE, BOUNDS);
+      const w = walkIn(id, SEAT, CUBICLE);
       for (let i = 1; i < w.x.length; i++) {
         const dx = Math.abs(w.x[i] - w.x[i - 1]);
         const dy = Math.abs(w.y[i] - w.y[i - 1]);
@@ -151,20 +152,21 @@ describe("walkIn", () => {
     }
   });
 
-  it("is the reverse of the same worker's walk-out", () => {
-    const out = walkOut("t3_mirror", SEAT, CUBICLE, BOUNDS);
-    const back = walkIn("t3_mirror", SEAT, CUBICLE, BOUNDS);
-    // Same deterministic route, reversed - and re-based from cubicle-relative
-    // (walk-out) to seat-relative (walk-in).
-    expect(back.x).toEqual([...out.x].reverse().map((x) => x - SEAT.x));
-    expect(back.y).toEqual([...out.y].reverse().map((y) => y - SEAT.y));
-    expect(back.duration).toBeCloseTo(out.duration, 6);
+  it("gives different posts different spawn points", () => {
+    const spawns = ["t3_a", "t3_b", "t3_c", "t3_d", "t3_e", "t3_f"].map((id) =>
+      Math.round(inWorld(walkIn(id, SEAT, CUBICLE), 0).x),
+    );
+    expect(new Set(spawns).size).toBeGreaterThan(1);
+  });
+
+  it("is a short stroll, not a cross-grid trek", () => {
+    const w = walkIn("t3_abc", SEAT, CUBICLE);
+    expect(w.duration).toBeGreaterThanOrEqual(0.9);
+    expect(w.duration).toBeLessThanOrEqual(2.2);
   });
 
   it("is deterministic per post id", () => {
-    expect(walkIn("t3_same", SEAT, CUBICLE, BOUNDS)).toEqual(
-      walkIn("t3_same", SEAT, CUBICLE, BOUNDS),
-    );
+    expect(walkIn("t3_same", SEAT, CUBICLE)).toEqual(walkIn("t3_same", SEAT, CUBICLE));
   });
 });
 
