@@ -8,7 +8,7 @@ import type {
   Worker as WorkerModel,
   WorkersByCubicle,
 } from "@/lib/domain/types";
-import { officeExtent } from "@/lib/office/decor";
+import { worldBounds } from "@/lib/data/layout";
 import { CubicleGroup } from "./CubicleGroup";
 import { Decor } from "./Decor";
 import type { Pulse } from "@/lib/office/useOffice";
@@ -51,9 +51,11 @@ export function OfficeStage({
 }: Props) {
   const animate = camera.zoom >= MOTION_MIN_ZOOM;
 
-  // Full office extent - departing workers walk out to a random point on this
-  // perimeter before fading. Stable per layout so it doesn't defeat the memos.
-  const bounds = useMemo(() => officeExtent(layout), [layout]);
+  // Cubicle-grid edge - departing workers walk the aisles out to this perimeter
+  // and fade there, same as where the ambient hallway NPCs expire (so they stop
+  // at the grid rather than overlapping the decorative structures around it).
+  // Stable per layout so it doesn't defeat the memos.
+  const bounds = useMemo(() => worldBounds(layout, 0), [layout]);
 
   function isVisible(x: number, y: number, w: number, h: number): boolean {
     const sx0 = camera.x + x * camera.zoom;

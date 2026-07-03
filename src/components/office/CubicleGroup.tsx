@@ -15,7 +15,7 @@ interface Props {
   subreddit: Subreddit;
   workers: WorkerModel[];
   pulses: Record<string, Pulse>;
-  /** Office perimeter a departing worker walks out to before fading. */
+  /** Cubicle-grid perimeter a departing worker walks out to before fading. */
   bounds: Bounds;
   animate: boolean;
   onSelect: (worker: WorkerModel) => void;

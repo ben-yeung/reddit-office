@@ -1,16 +1,19 @@
 import type { ReactNode } from "react";
-import { shade, type DeskProp as DeskPropType, type WorkerAppearance } from "@/lib/worker/appearance";
+import {
+  shade,
+  type DeskProp as DeskPropType,
+  type WorkerAppearance,
+} from "@/lib/worker/appearance";
 
 const HEAD_Y = -5;
 const HEAD_R = 7;
 
 /**
- * The static, procedurally-varied pixel character (bird's-eye): chair, desk,
- * monitor, keyboard, desk prop, torso, and a head whose hair/hat/accessory come
- * from the seeded appearance. Behavior (motion, events, trending, score) lives
- * in Worker.tsx.
+ * The desk half of a worker (bird's-eye): floor shadow, chair, desk, monitor,
+ * keyboard, and desk prop. A fixture of the seat - it stays in the cubicle when
+ * the occupant leaves (only WorkerBody walks out; see Worker.tsx).
  */
-export function WorkerSprite({
+export function WorkerDesk({
   appearance,
   shirtColor,
 }: {
@@ -18,7 +21,6 @@ export function WorkerSprite({
   shirtColor: string;
 }) {
   const a = appearance;
-  const shirt = shade(shirtColor, a.shirtPct);
   const chairSeat = shade(shirtColor, -0.5);
 
   return (
@@ -36,7 +38,28 @@ export function WorkerSprite({
       {/* keyboard */}
       <rect x={-11} y={20} width={22} height={3} rx={1} fill="var(--wall-dark)" />
       <DeskProp prop={a.prop} shirtColor={shirtColor} />
-      {/* torso */}
+    </g>
+  );
+}
+
+/**
+ * The person half of a worker (bird's-eye): a small cast shadow, torso, and the
+ * procedural head. This is the part that fades in on the seat and walks out of
+ * the cubicle when the post is replaced; the desk stays put.
+ */
+export function WorkerBody({
+  appearance,
+  shirtColor,
+}: {
+  appearance: WorkerAppearance;
+  shirtColor: string;
+}) {
+  const a = appearance;
+  const shirt = shade(shirtColor, a.shirtPct);
+
+  return (
+    <g className="pixelated">
+      <ellipse cx={0} cy={12} rx={12} ry={4} fill="rgba(0,0,0,0.22)" />
       <rect x={-11} y={-8} width={22} height={20} rx={7} fill={shirt} />
       <Head a={a} />
     </g>
@@ -69,7 +92,16 @@ function DeskProp({ prop, shirtColor }: { prop: DeskPropType; shirtColor: string
       return (
         <>
           <circle cx={18} cy={13} r={3.2} fill="#e7e2d8" />
-          <rect x={20.5} y={11.5} width={2.2} height={3} rx={1} fill="none" stroke="#e7e2d8" strokeWidth={1} />
+          <rect
+            x={20.5}
+            y={11.5}
+            width={2.2}
+            height={3}
+            rx={1}
+            fill="none"
+            stroke="#e7e2d8"
+            strokeWidth={1}
+          />
         </>
       );
     case "plant":
@@ -130,7 +162,17 @@ function Head({ a }: { a: WorkerAppearance }) {
     const by = hy - r * 0.06;
     const br = r + 0.6;
     els.push(<path key="bd" d={`M ${-br} ${by} A ${br} ${br} 0 0 1 ${br} ${by} Z`} fill={bc} />);
-    els.push(<rect key="bb" x={-br} y={by - 1.6} width={2 * br} height={3.2} rx={1.6} fill={shade(bc, -0.28)} />);
+    els.push(
+      <rect
+        key="bb"
+        x={-br}
+        y={by - 1.6}
+        width={2 * br}
+        height={3.2}
+        rx={1.6}
+        fill={shade(bc, -0.28)}
+      />,
+    );
     els.push(<circle key="bp" cx={0} cy={by - br - 1.4} r={1.7} fill={shade(bc, 0.35)} />);
   }
   if (a.style === "noogler") {
@@ -143,11 +185,26 @@ function Head({ a }: { a: WorkerAppearance }) {
       const y0 = (hy + cr * Math.sin(a0)).toFixed(2);
       const x1 = (cr * Math.cos(a1)).toFixed(2);
       const y1 = (hy + cr * Math.sin(a1)).toFixed(2);
-      els.push(<path key={`ng${k}`} d={`M 0 ${hy} L ${x0} ${y0} A ${cr} ${cr} 0 0 1 ${x1} ${y1} Z`} fill={g[k]} />);
+      els.push(
+        <path
+          key={`ng${k}`}
+          d={`M 0 ${hy} L ${x0} ${y0} A ${cr} ${cr} 0 0 1 ${x1} ${y1} Z`}
+          fill={g[k]}
+        />,
+      );
     }
     const py = hy - cr * 0.86;
     els.push(
-      <rect key="npr" x={-cr - 1} y={py - 0.8} width={2 * (cr + 1)} height={1.6} rx={0.8} fill="#e7e2d8" transform={`rotate(24 0 ${py})`} />,
+      <rect
+        key="npr"
+        x={-cr - 1}
+        y={py - 0.8}
+        width={2 * (cr + 1)}
+        height={1.6}
+        rx={0.8}
+        fill="#e7e2d8"
+        transform={`rotate(24 0 ${py})`}
+      />,
     );
     els.push(<circle key="nph" cx={0} cy={py} r={1.5} fill="#20242c" />);
   }

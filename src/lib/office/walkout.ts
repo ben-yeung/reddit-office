@@ -23,7 +23,10 @@ export interface WalkOut {
 /**
  * The path a replaced worker takes when they leave: get up from the desk, step
  * out through the cubicle's open bottom into the aisle, then follow the hallway
- * grid to a random edge of the office and fade out.
+ * grid to a random edge of the cubicle grid and fade out there - the same
+ * perimeter the ambient hallway NPCs expire at, so departing workers stop at the
+ * grid rather than overlapping the decorative structures around it. `bounds` is
+ * the cubicle-grid extent (`worldBounds(layout, 0)`).
  *
  * Routing is Manhattan along the aisle center-lines (the `GAP`-wide gaps between
  * cubicles), so the walk never cuts across another cubicle's footprint. Cubicles
@@ -61,8 +64,13 @@ export function walkOut(id: string, seat: Vec2, cubicle: Cubicle, bounds: Bounds
   // Step straight down out of the open bottom into the horizontal aisle.
   const pts: Vec2[] = [seatWorld, { x: seatWorld.x, y: corridorY }];
 
-  // ...then follow the hallway grid off a random edge.
-  const edge = pick(rng, ["left", "right", "top", "bottom"] as const);
+  // ...then follow the hallway grid off a random edge. Only edges that lie
+  // outward from the aisle we stepped into are eligible, so the walk never
+  // backtracks (e.g. a last-row worker has already crossed the bottom edge).
+  const edges: Array<"left" | "right" | "top" | "bottom"> = ["left", "right"];
+  if (bounds.minY < corridorY) edges.push("top");
+  if (bounds.maxY > corridorY) edges.push("bottom");
+  const edge = pick(rng, edges);
   if (edge === "left") {
     pts.push({ x: bounds.minX, y: corridorY });
   } else if (edge === "right") {
@@ -87,7 +95,9 @@ export function walkOut(id: string, seat: Vec2, cubicle: Cubicle, bounds: Bounds
   const y = pts.map((p) => p.y - pos.y);
   const cumulative = [0];
   for (let i = 1; i < pts.length; i++) {
-    cumulative.push(cumulative[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
+    cumulative.push(
+      cumulative[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y),
+    );
   }
   const total = cumulative[cumulative.length - 1] || 1;
   const times = cumulative.map((d) => d / total);
