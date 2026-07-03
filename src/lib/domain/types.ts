@@ -47,6 +47,8 @@ export interface Subreddit {
   displayName: string;
   /** Accent color for the cubicle + its workers. */
   color: string;
+  /** Community icon URL (community_icon || icon_img from /about), when set. */
+  iconUrl?: string;
 }
 
 /** The visual container for one subreddit, positioned in world space. */

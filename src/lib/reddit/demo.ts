@@ -12,11 +12,17 @@ import { CURATED_SUBREDDITS } from "@/lib/data/curatedSubreddits";
 import { getCredentials } from "./config";
 import { getAppToken } from "./tokens";
 import { redditGet } from "./client";
-import { mapComments, mapListing } from "./map";
+import { mapAboutIcon, mapComments, mapListing } from "./map";
 import type { DemoCommentsPayload, DemoOfficePayload, RedditPostDTO } from "./dto";
 
 /** Shared-cache lifetime. Demo data may be up to this stale - fine, it is a showcase. */
 const DEMO_REVALIDATE = 45; // seconds
+/**
+ * Community icons practically never change, so they're cached far longer than
+ * the hot listing: Reddit's `/about` is hit ~once a day per sub even though the
+ * office payload itself refreshes every {@link DEMO_REVALIDATE}s.
+ */
+const ICON_REVALIDATE = 86_400; // seconds (24h)
 /** Posts fetched per sub: a little headroom above ROSTER_MAX for roster selection. */
 const POSTS_PER_SUB = 12;
 /** Comment-thread cache lifetime (comments move slower than the hot listing). */
@@ -24,28 +30,42 @@ const COMMENTS_REVALIDATE = 120; // seconds
 /** Top-level comments shown per post - threads can run to thousands, so cap hard. */
 const COMMENTS_LIMIT = 20;
 
+/** Fetch one sub's community icon, or undefined if it has none / the call fails. */
+async function fetchSubredditIcon(name: string, token: string): Promise<string | undefined> {
+  try {
+    const json = await redditGet<unknown>(`/r/${name}/about`, { token, revalidate: ICON_REVALIDATE });
+    return mapAboutIcon(json);
+  } catch {
+    // A missing icon just falls back to the letter tile; never blank the office.
+    return undefined;
+  }
+}
+
 async function fetchCuratedOffice(): Promise<DemoOfficePayload> {
   const token = await getAppToken();
 
-  const entries = await Promise.all(
+  const results = await Promise.all(
     CURATED_SUBREDDITS.map(async (sub) => {
-      try {
-        const json = await redditGet<unknown>(`/r/${sub.name}/hot?limit=${POSTS_PER_SUB + 4}`, {
+      // Hot listing and icon are independent: fetch together, and let either
+      // fail on its own without dropping the other.
+      const [posts, iconUrl] = await Promise.all([
+        redditGet<unknown>(`/r/${sub.name}/hot?limit=${POSTS_PER_SUB + 4}`, {
           token,
           revalidate: DEMO_REVALIDATE,
-        });
-        return [sub.id, mapListing(json, sub.id, POSTS_PER_SUB)] as const;
-      } catch {
-        // One failing sub should not blank the whole office.
-        return [sub.id, [] as RedditPostDTO[]] as const;
-      }
+        })
+          .then((json) => mapListing(json, sub.id, POSTS_PER_SUB))
+          // One failing sub should not blank the whole office.
+          .catch(() => [] as RedditPostDTO[]),
+        fetchSubredditIcon(sub.name, token),
+      ]);
+      return { sub: iconUrl ? { ...sub, iconUrl } : sub, posts };
     }),
   );
 
   return {
     configured: true,
-    subreddits: CURATED_SUBREDDITS,
-    postsBySub: Object.fromEntries(entries),
+    subreddits: results.map((r) => r.sub),
+    postsBySub: Object.fromEntries(results.map((r) => [r.sub.id, r.posts])),
   };
 }
 

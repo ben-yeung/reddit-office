@@ -11,6 +11,11 @@ export interface DataSourceHandlers {
   onSnapshot: (snapshot: OfficeSnapshot) => void;
   /** A discrete event to animate (new-post, trending, surge, removed). */
   onEvent: (event: WorkerEvent) => void;
+  /**
+   * Late-arriving subreddit metadata (e.g. community icons fetched server-side).
+   * Optional: sources whose subreddit list is fully known up front never call it.
+   */
+  onSubreddits?: (subreddits: Subreddit[]) => void;
 }
 
 /**

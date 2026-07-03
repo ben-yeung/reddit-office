@@ -115,6 +115,9 @@ export function useOffice(modalOpen: boolean): OfficeApi {
     generateLayout(CURATED_SUBREDDITS, DEFAULT_SEED),
   );
   const [policy, setPolicyState] = useState<OfficePolicy>(DEFAULT_POLICY);
+  // Starts as the static curated list (drives layout + first paint); the demo
+  // source later emits the same subs enriched with community icons.
+  const [subreddits, setSubreddits] = useState<Subreddit[]>(CURATED_SUBREDDITS);
   const [workersByCubicle, setWorkersByCubicle] = useState<WorkersByCubicle>({});
   const [pulses, setPulses] = useState<Record<string, Pulse>>({});
 
@@ -156,6 +159,7 @@ export function useOffice(modalOpen: boolean): OfficeApi {
           ),
         );
       },
+      onSubreddits: (subs) => setSubreddits(subs),
       onEvent: (e) => {
         // Pulses are one-shot cosmetics; drop any that fire behind a modal.
         if (pausedRef.current) return;
@@ -262,7 +266,7 @@ export function useOffice(modalOpen: boolean): OfficeApi {
   }, [startSource]);
 
   return {
-    subreddits: CURATED_SUBREDDITS,
+    subreddits,
     layout,
     workersByCubicle,
     pulses,
