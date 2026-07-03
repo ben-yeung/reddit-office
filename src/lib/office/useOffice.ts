@@ -5,11 +5,8 @@ import { CURATED_SUBREDDITS } from "@/lib/data/curatedSubreddits";
 import { generateLayout, LAYOUT_VERSION } from "@/lib/data/layout";
 import { RedditDemoDataSource } from "@/lib/data/RedditDemoDataSource";
 import { DEFAULT_POLICY } from "@/lib/domain/constants";
-import {
-  loadPersisted,
-  savePersisted,
-  clearPersisted,
-} from "@/lib/persistence/localStore";
+import { WALKOUT_MAX_S } from "@/lib/office/walkout";
+import { loadPersisted, savePersisted, clearPersisted } from "@/lib/persistence/localStore";
 import type {
   Layout,
   OfficePolicy,
@@ -34,6 +31,55 @@ export function layoutMatchesSubreddits(layout: Layout, subreddits: Subreddit[])
 /** Keep only pulses from roughly the last N events (older ones have long since
     fired their one-shot animation) so the pulse map stays bounded. */
 const PULSE_RETENTION = 256;
+
+/** Once a worker drops off the roster it starts walking out; hold its id out of
+    the view for at least a full walk (plus a beat) so a jittery re-selection
+    can't snap the in-flight walker back to its seat and cancel the exit. */
+const DEPART_COMMIT_MS = Math.ceil(WALKOUT_MAX_S * 1000) + 400;
+
+/**
+ * Commit roster departures so an in-flight walk-out can't be interrupted.
+ *
+ * A worker leaves the roster in two ways: removed (then deleted) or simply
+ * bumped out of the top-N by momentum. A bumped worker is still a live post, so
+ * a later snapshot can re-select the same id - and re-adding a key that is still
+ * exiting makes AnimatePresence cancel the walk and snap it back to the seat.
+ * Under rapid churn that happens constantly, so departing workers never reach an
+ * edge. Here we detect any id that was on screen and is now gone (it has begun
+ * walking out), lock it for `lockMs`, and filter it from any snapshot that tries
+ * to re-add it before the walk finishes. After the lock it may re-enter as a
+ * fresh arrival. Mutates `departing` (id -> unlock time) and `prevShown`.
+ */
+export function commitDepartures(
+  incoming: WorkersByCubicle,
+  departing: Map<string, number>,
+  prevShown: Set<string>,
+  now: number,
+  lockMs: number,
+): WorkersByCubicle {
+  for (const [id, until] of departing) if (now >= until) departing.delete(id);
+
+  const incomingIds = new Set<string>();
+  for (const list of Object.values(incoming)) for (const w of list) incomingIds.add(w.id);
+
+  // Anything shown last time but absent now has started its walk-out: lock it.
+  for (const id of prevShown) {
+    if (!incomingIds.has(id)) departing.set(id, now + lockMs);
+  }
+
+  const filtered: WorkersByCubicle = {};
+  const shown = new Set<string>();
+  for (const [cubId, list] of Object.entries(incoming)) {
+    const kept = list.filter((w) => !departing.has(w.id));
+    filtered[cubId] = kept;
+    for (const w of kept) shown.add(w.id);
+  }
+
+  prevShown.clear();
+  for (const id of shown) prevShown.add(id);
+
+  return filtered;
+}
 
 /** A transient, one-shot animation trigger for a worker (bumped per event). */
 export interface Pulse {
@@ -66,15 +112,30 @@ export function useOffice(): OfficeApi {
 
   const sourceRef = useRef<RedditDemoDataSource | null>(null);
   const seqRef = useRef(0);
+  // Departure-commit bookkeeping (see commitDepartures): ids currently walking
+  // out (id -> unlock time) and the ids shown in the last snapshot.
+  const departingRef = useRef<Map<string, number>>(new Map());
+  const prevShownRef = useRef<Set<string>>(new Set());
 
   const startSource = useCallback((l: Layout, p: OfficePolicy) => {
     sourceRef.current?.stop();
     setWorkersByCubicle({});
     setPulses({});
+    departingRef.current.clear();
+    prevShownRef.current.clear();
     const src = new RedditDemoDataSource(CURATED_SUBREDDITS, l, p);
     sourceRef.current = src;
     src.start({
-      onSnapshot: (s) => setWorkersByCubicle(s.workersByCubicle),
+      onSnapshot: (s) =>
+        setWorkersByCubicle(
+          commitDepartures(
+            s.workersByCubicle,
+            departingRef.current,
+            prevShownRef.current,
+            Date.now(),
+            DEPART_COMMIT_MS,
+          ),
+        ),
       onEvent: (e) => {
         seqRef.current += 1;
         const seq = seqRef.current;
@@ -135,17 +196,14 @@ export function useOffice(): OfficeApi {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const setPolicy = useCallback(
-    (next: OfficePolicy) => {
-      setPolicyState(next);
-      sourceRef.current?.setPolicy(next);
-      setLayout((currentLayout) => {
-        savePersisted({ layout: currentLayout, policy: next });
-        return currentLayout;
-      });
-    },
-    [],
-  );
+  const setPolicy = useCallback((next: OfficePolicy) => {
+    setPolicyState(next);
+    sourceRef.current?.setPolicy(next);
+    setLayout((currentLayout) => {
+      savePersisted({ layout: currentLayout, policy: next });
+      return currentLayout;
+    });
+  }, []);
 
   const resetLayout = useCallback(() => {
     clearPersisted();

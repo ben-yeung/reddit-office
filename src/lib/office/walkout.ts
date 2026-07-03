@@ -4,6 +4,12 @@ import { hashString, mulberry32, pick, range } from "@/lib/util/rng";
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
+/** Walk-out pace bounds (seconds). A far edge takes longer, but never crawls or
+ *  blinks away. WALKOUT_MAX_S also sizes the roster departure lock in useOffice
+ *  so an in-flight walk can't be cancelled by a jittery re-selection. */
+export const WALKOUT_MIN_S = 1.8;
+export const WALKOUT_MAX_S = 4.5;
+
 /**
  * A departing worker's exit walk, as framer-motion keyframes in the cubicle's
  * local space (the worker group is translated to `cubicle.position`).
@@ -103,5 +109,5 @@ export function walkOut(id: string, seat: Vec2, cubicle: Cubicle, bounds: Bounds
   const times = cumulative.map((d) => d / total);
   const opacity = pts.map((_, i) => (i === pts.length - 1 ? 0 : 1));
 
-  return { x, y, opacity, times, duration: clamp(total / 220, 1.8, 4.5) };
+  return { x, y, opacity, times, duration: clamp(total / 220, WALKOUT_MIN_S, WALKOUT_MAX_S) };
 }
