@@ -1,47 +1,47 @@
 # Reddit Office
 
-Reddit Office is an ambient, real-time dashboard that renders a set of subreddits as a bird's-eye, 8-bit pixel-art office.
-Each subreddit is a **Cubicle**; notable posts are **Workers** inside it.
-Workers perform short animated **Actions** that encode real Reddit **Events** - a new post walking in, a worker glowing as it surges in upvotes, a worker being escorted out when its post is removed.
-The goal is to turn "what's happening across my subreddits right now" into something you can take in at a glance, and enjoy looking at.
+An ambient, real-time dashboard that renders a set of subreddits as a bird's-eye, 8-bit pixel-art office.
 
-It runs as a single Next.js app: a thin backend handles Reddit OAuth token exchange and proxies the Reddit API, while the client owns polling, roster state, and the pixel-art rendering.
+Each subreddit is a **Cubicle**; notable posts are **Workers** inside it.
+Workers animate real Reddit **Events** - a new post walks in, a worker glows as it surges in upvotes, a worker is escorted out when its post is removed.
+The point is to see "what's happening across my subreddits right now" at a glance.
+
+It runs as a single Next.js app: a thin backend does the Reddit OAuth token exchange and proxies the API, while the client owns polling, roster state, and rendering.
 
 ## How it works
 
-- **Demo mode (default).** Unauthenticated visitors see a curated office built from a fixed set of iconic subreddits, served from a shared server-side cache. Runs with zero secrets - if no Reddit credentials are configured it falls back to mock data.
-- **Authenticated mode.** After logging in with Reddit, the office is built from your own subscribed subreddits. Read-only scopes only (`identity`, `mysubreddits`, `read`); the user token lives in an httpOnly encrypted session cookie and never reaches the browser.
-- **Two-speed polling.** Reddit offers no push, so Events are derived by diffing polled snapshots: a slower per-subreddit *discovery poll* (`/new`, `/rising`) finds new and trending posts, and a fast batched *tracking poll* (`/api/info`) refreshes live score/comment counts for all tracked workers at once.
-- **Momentum + Roster.** Each cubicle keeps a bounded roster of notable workers, ranked by a per-subreddit-normalized momentum score so small and large subs stay comparable.
-- **Office Policy.** User-configurable worker sourcing (New / Momentum / Blend), per-event animation toggles, theme, and ambient office life - persisted client-side.
+- **Demo mode (default).** Unauthenticated visitors get a curated office of iconic subreddits from a shared server-side cache. No secrets required - it falls back to mock data when Reddit credentials aren't configured.
+- **Authenticated mode.** Log in with Reddit to build the office from your own subscriptions. Read-only scopes only; the user token stays in an httpOnly encrypted cookie and never reaches the browser.
+- **Two-speed polling.** Reddit has no push, so Events come from diffing polls: a slower *discovery poll* (`/new`, `/rising`) finds new/trending posts, and a fast batched *tracking poll* (`/api/info`) refreshes live scores and comment counts.
+- **Momentum + Roster.** Each cubicle keeps a bounded roster of workers, ranked by a per-subreddit-normalized momentum score so small and large subs stay comparable.
+- **Office Policy.** Client-persisted config: worker sourcing (New / Momentum / Blend), per-event animation toggles, theme, and ambient life.
 
-The office world uses a pan/zoom camera over SVG-rendered cubicles and workers. Click a worker to open a modal with the post and an "Open in Reddit" link (the app performs no writes).
+Pan/zoom camera over an SVG office. Click a worker for a modal with the post and an "Open in Reddit" link - the app performs no writes.
 
-See `docs/PRD.md`, `docs/glossary.md`, and `docs/adr/` for the full design and decision records.
+Full design and decision records live in `docs/PRD.md`, `docs/glossary.md`, and `docs/adr/`.
 
 ## Tech stack
 
-- **[Next.js](https://nextjs.org) 16** (App Router) + **React 19** + **TypeScript** (`strict`, `@/*` path alias)
+- **[Next.js](https://nextjs.org) 16** (App Router) + **React 19** + **TypeScript** (`strict`, `@/*` alias)
 - **[framer-motion](https://www.framer.com/motion/)** - worker actions and modal transitions
 - **[@tanstack/react-query](https://tanstack.com/query)** - fetching and caching
-- **CSS Modules** for styling; SVG for the pixel-art rendering (no Tailwind, no CSS-in-JS)
+- **CSS Modules** + **SVG** for styling and the pixel-art rendering (no Tailwind, no CSS-in-JS)
 - **[Vitest](https://vitest.dev)** + **React Testing Library** + jsdom for tests
-- **ESLint** (`eslint-config-next`) + **Prettier** for lint/format
+- **ESLint** (`eslint-config-next`) + **Prettier**
 
 ## Getting started
-
-Install dependencies and run the dev server:
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) to see the office. It works out of the box in demo mode with mock data - no configuration required.
+Open [http://localhost:3000](http://localhost:3000).
+It works out of the box in demo mode with mock data - no configuration required.
 
 ### Enabling live Reddit data and login
 
-Create a Reddit "web app" credential and set the following environment variables (e.g. in `.env.local`):
+Create a Reddit "web app" credential and set these in `.env.local`:
 
 ```bash
 REDDIT_CLIENT_ID=...
@@ -51,7 +51,7 @@ REDDIT_REDIRECT_URI=...       # optional; defaults to <origin>/api/auth/callback
 REDDIT_USER_AGENT=...         # optional; a descriptive UA is set by default
 ```
 
-The OAuth redirect URI must exactly match one registered on your Reddit app.
+The redirect URI must exactly match one registered on your Reddit app.
 
 ## Scripts
 
