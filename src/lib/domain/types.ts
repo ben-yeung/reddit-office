@@ -17,6 +17,14 @@ export type WorkerEventType = "new-post" | "trending" | "surge" | "removed";
 /** Office visual theme. */
 export type OfficeTheme = "dark" | "light";
 
+/**
+ * How a post presents its content (mirrors Reddit's `post_hint`, simplified).
+ * - "text": a self-text post; {@link Worker.body} carries the copy.
+ * - "image": the image is the content; body is usually empty.
+ * - "link": an outbound link with a preview image + domain.
+ */
+export type PostKind = "text" | "image" | "link";
+
 export interface Subreddit {
   /** Reddit fullname-style id, e.g. "t5_2fwo". Mock generates stable ids. */
   id: string;
@@ -46,6 +54,14 @@ export interface Worker {
   author: string;
   /** Post content preview (self text or a link description). */
   body: string;
+  /** How the post presents its content. */
+  kind: PostKind;
+  /** Preview/content image URL for "image" and "link" posts, when available. */
+  image?: string;
+  /** External domain for "link" posts, e.g. "themirror.com". */
+  linkDomain?: string;
+  /** Optional flair label rendered as a pill, e.g. "article", "OC". */
+  flair?: string;
   /** Permalink path on reddit.com. */
   permalink: string;
   /** ms epoch of creation. */

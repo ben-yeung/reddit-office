@@ -3,6 +3,7 @@ import type {
   Layout,
   OfficePolicy,
   OfficeSnapshot,
+  PostKind,
   StatSample,
   Subreddit,
   Worker,
@@ -30,6 +31,10 @@ interface SimPost {
   title: string;
   author: string;
   body: string;
+  kind: PostKind;
+  image?: string;
+  linkDomain?: string;
+  flair?: string;
   permalink: string;
   createdAt: number;
   score: number;
@@ -86,12 +91,115 @@ const NOUNS = [
 
 const AUTHOR_WORDS = ["pixel", "snoo", "byte", "quantum", "midnight", "coffee", "neon", "lofi"];
 
+/** Self-text bodies for text posts (image/link posts carry no prose body). */
+const SELF_TEXTS = [
+  "Been chasing this for a while and finally cracked it. Happy to answer questions below.",
+  "Not sure this is the right place to ask, but it's been bugging me all week.",
+  "Sharing in case it saves someone else the afternoon I just lost to it.",
+  "Long-time lurker, first real post. Be gentle.",
+  "Quick write-up of how I got here, in case it helps anyone.",
+];
+
+/** Domains link posts point at (mirrors the reference's themirror.com bar). */
+const LINK_DOMAINS = [
+  "themirror.com",
+  "nytimes.com",
+  "bbc.co.uk",
+  "youtube.com",
+  "medium.com",
+  "arstechnica.com",
+];
+
+/** Post flairs shown as a pill under the title. */
+const FLAIRS = ["article", "discussion", "OC", "media", "news", "meta"];
+
+/** Occasional captions on image posts - some carry markdown to exercise rendering. */
+const IMAGE_CAPTIONS = [
+  "",
+  "",
+  "Shot this on a **35mm** lens - full set in the comments.",
+  "First attempt at this style. Feedback *very* welcome!",
+  "See the [original source](https://www.reddit.com) for context.",
+];
+
 function makeAuthor(rng: Rng): string {
   return `u/${pick(rng, AUTHOR_WORDS)}_${intRange(rng, 100, 999)}`;
 }
 
 function makeTitle(rng: Rng): string {
   return pick(rng, TITLE_TEMPLATES).replace("{n}", pick(rng, NOUNS));
+}
+
+// --- offline placeholder imagery -----------------------------------------
+// Real Reddit posts carry real image URLs; mock posts get a self-contained SVG
+// gradient (no network) tinted by the subreddit's accent color.
+
+function clamp8(n: number): number {
+  return Math.max(0, Math.min(255, Math.round(n)));
+}
+
+function parseHex(hex: string): [number, number, number] {
+  let h = hex.replace("#", "");
+  if (h.length === 3) h = h.replace(/(.)/g, "$1$1");
+  const n = parseInt(h, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function toHex(rgb: [number, number, number]): string {
+  return `#${rgb.map((c) => clamp8(c).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** Blend a color toward a target by ratio t (0..1). */
+function mixColor(hex: string, target: [number, number, number], t: number): string {
+  const [r, g, b] = parseHex(hex);
+  return toHex([r + (target[0] - r) * t, g + (target[1] - g) * t, b + (target[2] - b) * t]);
+}
+
+/** A deterministic, network-free gradient image as a data URI, tinted by color. */
+function gradientImage(rng: Rng, color: string): string {
+  const light = mixColor(color, [255, 255, 255], 0.35);
+  const dark = mixColor(color, [10, 12, 18], 0.72);
+  const bx = intRange(rng, 15, 70);
+  const by = intRange(rng, 12, 55);
+  const svg =
+    `<svg xmlns='http://www.w3.org/2000/svg' width='1200' height='800' viewBox='0 0 1200 800'>` +
+    `<defs>` +
+    `<linearGradient id='g' x1='0' y1='0' x2='1' y2='1'>` +
+    `<stop offset='0' stop-color='${color}'/><stop offset='1' stop-color='${dark}'/>` +
+    `</linearGradient>` +
+    `<radialGradient id='r' cx='${bx}%' cy='${by}%' r='65%'>` +
+    `<stop offset='0' stop-color='${light}' stop-opacity='0.55'/>` +
+    `<stop offset='1' stop-color='${light}' stop-opacity='0'/>` +
+    `</radialGradient>` +
+    `</defs>` +
+    `<rect width='1200' height='800' fill='url(#g)'/>` +
+    `<rect width='1200' height='800' fill='url(#r)'/>` +
+    `</svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+/**
+ * Decide a mock post's presentation: ~40% image, ~20% link, ~40% text - so the
+ * office reads like an image-heavy feed. Image/link posts get a deterministic,
+ * offline gradient preview seeded off the current rng draw.
+ */
+function makeContent(
+  rng: Rng,
+  title: string,
+  color: string,
+): Pick<SimPost, "kind" | "body" | "image" | "flair" | "linkDomain"> {
+  const flair = chance(rng, 0.55) ? pick(rng, FLAIRS) : undefined;
+  const roll = rng();
+  if (roll < 0.4) {
+    // Image post: the image is the content, with an occasional caption.
+    return { kind: "image", body: pick(rng, IMAGE_CAPTIONS), image: gradientImage(rng, color), flair };
+  }
+  if (roll < 0.6) {
+    // Link post: a preview image + domain bar; no prose body.
+    const linkDomain = pick(rng, LINK_DOMAINS);
+    return { kind: "link", body: "", image: gradientImage(rng, color), linkDomain, flair };
+  }
+  return { kind: "text", body: pick(rng, SELF_TEXTS), flair };
 }
 
 /**
@@ -177,12 +285,18 @@ export class MockDataSource implements DataSource {
     const heat = fresh ? range(this.rng, 0.8, 1.4) : range(this.rng, 0.3, 1.3);
     const baseScore = fresh ? intRange(this.rng, 1, 8) : intRange(this.rng, 5, 400);
     const baseComments = Math.round(baseScore * range(this.rng, 0.05, 0.3));
+    const title = makeTitle(this.rng);
+    const content = makeContent(this.rng, title, sim.sub.color);
     const post: SimPost = {
       id,
       subredditId: sim.sub.id,
-      title: makeTitle(this.rng),
+      title,
       author: makeAuthor(this.rng),
-      body: "A mock post standing in for real Reddit content until the API layer lands.",
+      body: content.body,
+      kind: content.kind,
+      image: content.image,
+      linkDomain: content.linkDomain,
+      flair: content.flair,
       permalink: `https://www.reddit.com/${sim.sub.displayName}/comments/${id}/`,
       createdAt,
       score: baseScore,
@@ -360,6 +474,10 @@ export class MockDataSource implements DataSource {
       title: p.title,
       author: p.author,
       body: p.body,
+      kind: p.kind,
+      image: p.image,
+      linkDomain: p.linkDomain,
+      flair: p.flair,
       permalink: p.permalink,
       createdAt: p.createdAt,
       score: p.score,
