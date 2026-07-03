@@ -10,10 +10,16 @@
  * Blur and tint fill the viewport behind the card. They are pointer-transparent
  * so backdrop clicks reach `.root` (which handles close), and clicks on the card
  * do not. The blur layer deliberately has no opacity transition - see ModalScrim.
+ *
+ * z-index: -1 keeps both layers behind the card. Because they are positioned and
+ * the card (children) is ordinary in-flow content, without this they would paint
+ * *above* the card unless every caller remembered to position its card. Pinning
+ * them below here makes any card - positioned or not - sit on top of the backdrop.
  */
 .blur,
 .tint {
   position: absolute;
   inset: 0;
+  z-index: -1;
   pointer-events: none;
 }
