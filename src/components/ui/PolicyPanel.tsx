@@ -8,6 +8,8 @@ interface Props {
   policy: OfficePolicy;
   onChange: (next: OfficePolicy) => void;
   onReset: () => void;
+  /** A shuffle migration is animating; disable the control until it settles. */
+  shuffling: boolean;
 }
 
 const SOURCING: Array<{ value: SourcingRule; label: string }> = [
@@ -24,7 +26,7 @@ const EVENTS: Array<{ value: WorkerEventType; label: string }> = [
 ];
 
 /** The Office Policy panel: worker sourcing + per-event animation toggles (ADR-0005). */
-export function PolicyPanel({ policy, onChange, onReset }: Props) {
+export function PolicyPanel({ policy, onChange, onReset, shuffling }: Props) {
   const [open, setOpen] = useState(true);
 
   function setSourcing(sourcing: SourcingRule) {
@@ -147,8 +149,8 @@ export function PolicyPanel({ policy, onChange, onReset }: Props) {
             </div>
           </div>
 
-          <button className={styles.reset} onClick={onReset}>
-            Shuffle office layout
+          <button className={styles.reset} onClick={onReset} disabled={shuffling}>
+            {shuffling ? "Reshuffling…" : "Shuffle office layout"}
           </button>
         </div>
       )}

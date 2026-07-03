@@ -23,6 +23,9 @@ interface Props {
   ambient: boolean;
   /** Freeze all background motion (a modal is open with pause-on-modal enabled). */
   paused: boolean;
+  /** True during a post-shuffle repopulation: the new roster walks in from the
+      grid edges to their reshuffled desks rather than fading in at the seats. */
+  arriving: boolean;
   onSelectWorker: (worker: WorkerModel) => void;
 }
 
@@ -50,6 +53,7 @@ export function OfficeStage({
   viewport,
   ambient,
   paused,
+  arriving,
   onSelectWorker,
 }: Props) {
   // `paused` freezes all background motion while a modal is open (pause-on-modal
@@ -129,6 +133,7 @@ export function OfficeStage({
               pulses={pulses}
               bounds={bounds}
               animate={animate}
+              enter={arriving}
               onSelect={onSelectWorker}
             />
           );

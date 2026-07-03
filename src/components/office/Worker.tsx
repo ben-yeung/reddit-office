@@ -6,7 +6,7 @@ import type { Cubicle as CubicleModel, Vec2, Worker as WorkerModel } from "@/lib
 import type { Bounds } from "@/lib/data/layout";
 import type { WorkerAppearance } from "@/lib/worker/appearance";
 import type { Pulse } from "@/lib/office/useOffice";
-import { walkOut } from "@/lib/office/walkout";
+import { walkIn, walkOut } from "@/lib/office/walkout";
 import { WorkerDesk, WorkerBody } from "./WorkerSprite";
 import styles from "./Worker.module.css";
 
@@ -68,6 +68,9 @@ interface Props {
   pulse?: Pulse;
   /** Whether idle motion runs. Gated off when zoomed too far out to perceive it. */
   animate: boolean;
+  /** True for workers mounting during a post-shuffle arrival: they walk in from
+      the grid edge to their new seat instead of appearing at the desk. */
+  enter: boolean;
   onSelect: (worker: WorkerModel) => void;
 }
 
@@ -87,10 +90,44 @@ export function Worker({
   color,
   pulse,
   animate,
+  enter,
   onSelect,
 }: Props) {
   const sprite = useAnimationControls();
   const fx = useAnimationControls();
+  const enterCtl = useAnimationControls();
+
+  // A worker that mounts during the post-shuffle arrival window walks in from the
+  // grid edge to its seat; everyone else just appears at the desk. `walkIn` is
+  // deterministic per id, so this memo returns stable values across re-renders and
+  // the entrance never re-triggers on a pulse. The travel lives on an inner group
+  // (below) so the outer group's declarative enter/exit/opacity stay untouched -
+  // and the exit walk-out still works normally.
+  const enterWalk = useMemo(
+    () => (enter && animate ? walkIn(worker.id, seat, cubicle, bounds) : null),
+    [enter, animate, worker.id, seat, cubicle, bounds],
+  );
+  // The inner group's offset is the walk path expressed relative to the seat, so
+  // it ends at (0,0) - dead on the seat the outer group already sits at. Only read
+  // on mount (framer ignores `initial` afterwards).
+  const enterInitial = enterWalk
+    ? { x: enterWalk.x[0] - seat.x, y: enterWalk.y[0] - seat.y }
+    : { x: 0, y: 0 };
+
+  useEffect(() => {
+    // Captures the mount-time entrance walk; runs once so arriving workers play it
+    // a single time and later re-renders can't restart or cancel it.
+    if (!enterWalk) return;
+    enterCtl.start({
+      x: enterWalk.x.map((x) => x - seat.x),
+      y: enterWalk.y.map((y) => y - seat.y),
+      transition: {
+        x: { duration: enterWalk.duration, times: enterWalk.times, ease: "linear" },
+        y: { duration: enterWalk.duration, times: enterWalk.times, ease: "linear" },
+      },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // On removal/replacement the body gets up, steps out through the cubicle's open
   // bottom, and strolls the aisles to the grid edge before fading. Deterministic
@@ -148,65 +185,71 @@ export function Worker({
       onPointerDown={(e) => e.stopPropagation()}
       onClick={() => onSelect(worker)}
     >
-      {/* Idle bob: CSS-driven (compositor) instead of a per-worker JS loop, and
-          skipped when zoomed too far out to see it. Only the person bobs. */}
-      <g
-        className={animate ? styles.bob : undefined}
-        style={animate ? ({ "--bob-dur": `${bobDuration}s` } as CSSProperties) : undefined}
-      >
-        <motion.g animate={sprite}>
-          {/* trending glow (behind the body) */}
-          {worker.trending && (
-            <>
-              <circle cx={0} cy={-2} r={26} fill={color} opacity={0.16} />
-              <circle cx={0} cy={-2} r={19} fill={color} opacity={0.12} />
-            </>
-          )}
+      {/* Arrival walk-in: on a shuffle, an incoming worker starts at the grid edge
+          (enterInitial offset) and strolls to its seat (offset -> 0). A no-op for
+          everyone else. Kept on its own group so the outer group's enter/exit is
+          undisturbed. */}
+      <motion.g initial={enterInitial} animate={enterCtl}>
+        {/* Idle bob: CSS-driven (compositor) instead of a per-worker JS loop, and
+            skipped when zoomed too far out to see it. Only the person bobs. */}
+        <g
+          className={animate ? styles.bob : undefined}
+          style={animate ? ({ "--bob-dur": `${bobDuration}s` } as CSSProperties) : undefined}
+        >
+          <motion.g animate={sprite}>
+            {/* trending glow (behind the body) */}
+            {worker.trending && (
+              <>
+                <circle cx={0} cy={-2} r={26} fill={color} opacity={0.16} />
+                <circle cx={0} cy={-2} r={19} fill={color} opacity={0.12} />
+              </>
+            )}
 
-          <WorkerBody appearance={appearance} shirtColor={color} />
+            <WorkerBody appearance={appearance} shirtColor={color} />
 
-          {/* trending star */}
-          {worker.trending && (
-            <path
-              d="M0,-24 L2.2,-19 L7.5,-18.5 L3.5,-15 L4.8,-9.8 L0,-12.7 L-4.8,-9.8 L-3.5,-15 L-7.5,-18.5 L-2.2,-19 Z"
-              fill="var(--accent)"
-              stroke="#1d2028"
-              strokeWidth={0.6}
-            />
-          )}
-
-          {/* removed marker */}
-          {worker.removed && (
-            <>
-              <rect x={-26} y={-20} width={52} height={44} fill="rgba(210,58,58,0.28)" />
+            {/* trending star */}
+            {worker.trending && (
               <path
-                d="M -8 -14 L 8 2 M 8 -14 L -8 2"
-                stroke="var(--removed)"
-                strokeWidth={3}
-                strokeLinecap="round"
+                d="M0,-24 L2.2,-19 L7.5,-18.5 L3.5,-15 L4.8,-9.8 L0,-12.7 L-4.8,-9.8 L-3.5,-15 L-7.5,-18.5 L-2.2,-19 Z"
+                fill="var(--accent)"
+                stroke="#1d2028"
+                strokeWidth={0.6}
               />
-            </>
-          )}
+            )}
 
-          {/* score readout */}
-          <text
-            className="pixel-font"
-            x={0}
-            y={30}
-            fontSize={7}
-            fill="var(--ink-dim)"
-            textAnchor="middle"
-          >
-            {formatScore(worker.score)}
-          </text>
+            {/* removed marker */}
+            {worker.removed && (
+              <>
+                <rect x={-26} y={-20} width={52} height={44} fill="rgba(210,58,58,0.28)" />
+                <path
+                  d="M -8 -14 L 8 2 M 8 -14 L -8 2"
+                  stroke="var(--removed)"
+                  strokeWidth={3}
+                  strokeLinecap="round"
+                />
+              </>
+            )}
 
-          {/* surge FX (arrows) */}
-          <motion.g initial={{ opacity: 0, y: -6 }} animate={fx}>
-            <path d="M -6 0 L 0 -8 L 6 0 Z" fill="var(--accent)" />
-            <path d="M -6 6 L 0 -2 L 6 6 Z" fill="var(--accent-soft)" opacity={0.8} />
+            {/* score readout */}
+            <text
+              className="pixel-font"
+              x={0}
+              y={30}
+              fontSize={7}
+              fill="var(--ink-dim)"
+              textAnchor="middle"
+            >
+              {formatScore(worker.score)}
+            </text>
+
+            {/* surge FX (arrows) */}
+            <motion.g initial={{ opacity: 0, y: -6 }} animate={fx}>
+              <path d="M -6 0 L 0 -8 L 6 0 Z" fill="var(--accent)" />
+              <path d="M -6 6 L 0 -2 L 6 6 Z" fill="var(--accent-soft)" opacity={0.8} />
+            </motion.g>
           </motion.g>
-        </motion.g>
-      </g>
+        </g>
+      </motion.g>
     </motion.g>
   );
 }

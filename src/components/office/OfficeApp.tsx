@@ -111,6 +111,7 @@ export function OfficeApp() {
         viewport={size}
         ambient={office.policy.ambient}
         paused={freezeBackground}
+        arriving={office.arriving}
         onSelectWorker={onSelectWorker}
       />
 
@@ -128,6 +129,7 @@ export function OfficeApp() {
         policy={office.policy}
         onChange={office.setPolicy}
         onReset={office.resetLayout}
+        shuffling={office.shuffling}
       />
 
       <Hud

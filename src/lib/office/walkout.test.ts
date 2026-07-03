@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Cubicle, Vec2 } from "@/lib/domain/types";
 import { CELL_W, CELL_H, type Bounds } from "@/lib/data/layout";
-import { walkOut } from "./walkout";
+import { walkIn, walkOut } from "./walkout";
 
 // A cubicle at grid cell (1, 1), so it has aisles on every side.
 const CUBICLE: Cubicle = {
@@ -107,5 +107,79 @@ describe("walkOut", () => {
       return `${Math.round(e.x)},${Math.round(e.y)}`;
     });
     expect(new Set(ends).size).toBeGreaterThan(1);
+  });
+});
+
+/** First keyframe converted back to world space. */
+function startWorld(w: ReturnType<typeof walkIn>): Vec2 {
+  return {
+    x: w.x[0] + CUBICLE.position.x,
+    y: w.y[0] + CUBICLE.position.y,
+  };
+}
+
+describe("walkIn", () => {
+  it("ends exactly at the seat", () => {
+    const w = walkIn("t3_abc", SEAT, CUBICLE, BOUNDS);
+    expect(w.x[w.x.length - 1]).toBe(SEAT.x);
+    expect(w.y[w.y.length - 1]).toBe(SEAT.y);
+  });
+
+  it("steps in from directly below the cubicle (through the open bottom)", () => {
+    const w = walkIn("t3_abc", SEAT, CUBICLE, BOUNDS);
+    const n = w.x.length;
+    expect(w.x[n - 2]).toBe(SEAT.x); // straight up into the seat: same x
+    expect(w.y[n - 2]).toBeGreaterThan(CUBICLE.size.h); // enters from past the bottom wall
+  });
+
+  it("starts on a world edge, fading in from invisible", () => {
+    const w = walkIn("t3_abc", SEAT, CUBICLE, BOUNDS);
+    const start = startWorld(w);
+    const onEdge =
+      Math.abs(start.x - BOUNDS.minX) < 1e-6 ||
+      Math.abs(start.x - BOUNDS.maxX) < 1e-6 ||
+      Math.abs(start.y - BOUNDS.minY) < 1e-6 ||
+      Math.abs(start.y - BOUNDS.maxY) < 1e-6;
+    expect(onEdge).toBe(true);
+    expect(w.opacity[0]).toBe(0);
+    expect(w.opacity[w.opacity.length - 1]).toBe(1);
+  });
+
+  it("routes Manhattan along the aisles - every leg is axis-aligned", () => {
+    for (const id of ["t3_a", "t3_b", "t3_c", "t3_d", "t3_e", "t3_f", "t3_g", "t3_h"]) {
+      const w = walkIn(id, SEAT, CUBICLE, BOUNDS);
+      for (let i = 1; i < w.x.length; i++) {
+        const dx = Math.abs(w.x[i] - w.x[i - 1]);
+        const dy = Math.abs(w.y[i] - w.y[i - 1]);
+        expect(Math.min(dx, dy)).toBeLessThan(1e-6);
+      }
+    }
+  });
+
+  it("fades in on its own continuous track: one smooth fade, then held full", () => {
+    const w = walkIn("t3_abc", SEAT, CUBICLE, BOUNDS);
+    expect(w.opacity).toHaveLength(w.opacityTimes.length);
+    expect(w.opacity).toEqual([0, 1, 1]); // gone, full, still full - one fade in
+    expect(w.opacityTimes[0]).toBe(0);
+    expect(w.opacityTimes[w.opacityTimes.length - 1]).toBe(1);
+    for (let i = 1; i < w.opacityTimes.length; i++)
+      expect(w.opacityTimes[i]).toBeGreaterThan(w.opacityTimes[i - 1]);
+    // fades in over just the opening stretch, then holds full the rest of the way
+    expect(w.opacityTimes[1]).toBeLessThan(0.5);
+  });
+
+  it("is the reverse of the same worker's walk-out", () => {
+    const out = walkOut("t3_mirror", SEAT, CUBICLE, BOUNDS);
+    const back = walkIn("t3_mirror", SEAT, CUBICLE, BOUNDS);
+    // Same deterministic route, reversed: walk-in waypoints are walk-out's flipped.
+    expect(back.x).toEqual([...out.x].reverse());
+    expect(back.y).toEqual([...out.y].reverse());
+    expect(back.duration).toBeCloseTo(out.duration, 6);
+  });
+
+  it("is deterministic per post id", () => {
+    const a = walkIn("t3_same", SEAT, CUBICLE, BOUNDS);
+    const b = walkIn("t3_same", SEAT, CUBICLE, BOUNDS);
+    expect(b).toEqual(a);
   });
 });

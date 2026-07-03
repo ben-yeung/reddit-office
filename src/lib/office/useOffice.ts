@@ -38,6 +38,28 @@ const PULSE_RETENTION = 256;
 const DEPART_COMMIT_MS = Math.ceil(WALKOUT_MAX_S * 1000) + 400;
 
 /**
+ * "Shuffle office layout" is a fully-animated migration, not an instant swap:
+ * the whole roster walks out, the empty cubicles slide to their reshuffled
+ * cells, then a fresh roster walks in from the grid edges to the new desks.
+ * These are the phase durations (ms).
+ */
+// Phase 1: let every worker finish its walk-out. The farthest walker takes
+// WALKOUT_MAX_S; wait the full span so none is clipped mid-stride (the old bug).
+const SHUFFLE_EVACUATE_MS = Math.round(WALKOUT_MAX_S * 1000);
+// Phase 2: empty cubicles slide to their new grid cells (matches the CubicleGroup
+// slide transition, plus a beat to settle) before anyone files back in.
+const SHUFFLE_RECONFIGURE_MS = 800;
+// Phase 3: hold the walk-in window open long enough for the first repopulated
+// batch to file in from the edges; afterwards ongoing churn fades in as usual.
+const SHUFFLE_ARRIVE_MS = 2500;
+
+/** True if any cubicle has at least one worker (the office is populated). */
+function anyWorkers(byCubicle: WorkersByCubicle): boolean {
+  for (const list of Object.values(byCubicle)) if (list.length > 0) return true;
+  return false;
+}
+
+/**
  * Commit roster departures so an in-flight walk-out can't be interrupted.
  *
  * A worker leaves the roster in two ways: removed (then deleted) or simply
@@ -95,6 +117,11 @@ export interface OfficeApi {
   policy: OfficePolicy;
   setPolicy: (next: OfficePolicy) => void;
   resetLayout: () => void;
+  /** A shuffle migration is in progress (roster is walking out / office is
+      reconfiguring). Used to disable the shuffle control until it settles. */
+  shuffling: boolean;
+  /** The post-shuffle roster is currently walking in from the grid edges. */
+  arriving: boolean;
 }
 
 /**
@@ -117,6 +144,11 @@ export function useOffice(modalOpen: boolean): OfficeApi {
   const [policy, setPolicyState] = useState<OfficePolicy>(DEFAULT_POLICY);
   const [workersByCubicle, setWorkersByCubicle] = useState<WorkersByCubicle>({});
   const [pulses, setPulses] = useState<Record<string, Pulse>>({});
+  // Shuffle-migration UI state: `shuffling` gates the control while the office
+  // empties + reconfigures; `arriving` marks the window during which the fresh
+  // roster walks in from the grid edges (see resetLayout).
+  const [shuffling, setShuffling] = useState(false);
+  const [arriving, setArriving] = useState(false);
 
   const sourceRef = useRef<RedditDemoDataSource | null>(null);
   const seqRef = useRef(0);
@@ -127,6 +159,12 @@ export function useOffice(modalOpen: boolean): OfficeApi {
   // While paused (modal open), the newest snapshot is parked here and flushed on resume.
   const pausedRef = useRef(false);
   const pendingSnapshotRef = useRef<WorkersByCubicle | null>(null);
+  // Shuffle bookkeeping: a synchronous re-entry guard, the pending phase timers
+  // (cleared on unmount), and a flag that opens the walk-in window on the first
+  // populated snapshot after a shuffle.
+  const shufflingRef = useRef(false);
+  const shuffleTimersRef = useRef<number[]>([]);
+  const justShuffledRef = useRef(false);
 
   const startSource = useCallback((l: Layout, p: OfficePolicy) => {
     sourceRef.current?.stop();
@@ -143,6 +181,16 @@ export function useOffice(modalOpen: boolean): OfficeApi {
         if (pausedRef.current) {
           pendingSnapshotRef.current = s.workersByCubicle;
           return;
+        }
+        // First populated snapshot after a shuffle: open the walk-in window so
+        // this batch files in from the grid edges to the new desks, then close it
+        // so ongoing churn resumes fading in at the seats. Flag and workers are
+        // set together (auto-batched), so these workers mount with `enter` true.
+        if (justShuffledRef.current && anyWorkers(s.workersByCubicle)) {
+          justShuffledRef.current = false;
+          setArriving(true);
+          const t = window.setTimeout(() => setArriving(false), SHUFFLE_ARRIVE_MS);
+          shuffleTimersRef.current.push(t);
         }
         // Commit roster departures so an in-flight walk-out isn't cancelled by a
         // jittery re-selection (see commitDepartures).
@@ -249,17 +297,66 @@ export function useOffice(modalOpen: boolean): OfficeApi {
     });
   }, []);
 
+  // Shuffle as a fully-animated migration (three phases). The old behaviour swapped
+  // the layout and rebuilt the roster in one synchronous burst, so cubicles
+  // teleported and a brand-new roster faded in on top of a half-played walk-out -
+  // the "flash". Instead we let the current roster fully evacuate, slide the empty
+  // cubicles to their new cells, then walk a fresh roster back in.
   const resetLayout = useCallback(() => {
-    clearPersisted();
+    if (shufflingRef.current) return; // ignore re-clicks mid-migration
+    shufflingRef.current = true;
+    setShuffling(true);
+
+    // Phase 1 - Evacuate. Stop the source and clear the roster while keeping the
+    // CURRENT layout mounted, so every worker plays its full walk-out in place.
+    sourceRef.current?.stop();
+    sourceRef.current = null;
+    setPulses({});
+    departingRef.current.clear();
+    prevShownRef.current.clear();
+    pendingSnapshotRef.current = null;
+    setWorkersByCubicle({});
+
     const seed = Math.floor(Math.random() * 1_000_000_000);
     const next = generateLayout(CURATED_SUBREDDITS, seed);
-    setLayout(next);
-    setPolicyState((currentPolicy) => {
-      savePersisted({ layout: next, policy: currentPolicy });
-      startSource(next, currentPolicy);
-      return currentPolicy;
-    });
+
+    // Phase 2 - Reconfigure. Once the floor is empty, swap in the new layout; the
+    // now-empty cubicles slide to their reshuffled cells (CubicleGroup animates the
+    // move). Persist here so a reload keeps the new arrangement.
+    const t1 = window.setTimeout(() => {
+      clearPersisted();
+      setLayout(next);
+      setPolicyState((currentPolicy) => {
+        savePersisted({ layout: next, policy: currentPolicy });
+        return currentPolicy;
+      });
+    }, SHUFFLE_EVACUATE_MS);
+
+    // Phase 3 - Arrive. After the cubicles settle, start a fresh source; the new
+    // roster walks in from the grid edges to the new desks (justShuffledRef opens
+    // the walk-in window on the first populated snapshot).
+    const t2 = window.setTimeout(() => {
+      justShuffledRef.current = true;
+      setPolicyState((currentPolicy) => {
+        startSource(next, currentPolicy);
+        return currentPolicy;
+      });
+      shufflingRef.current = false;
+      setShuffling(false);
+    }, SHUFFLE_EVACUATE_MS + SHUFFLE_RECONFIGURE_MS);
+
+    shuffleTimersRef.current.push(t1, t2);
   }, [startSource]);
+
+  // Clear any pending shuffle-phase timers on unmount so they can't fire against a
+  // torn-down tree.
+  useEffect(
+    () => () => {
+      for (const t of shuffleTimersRef.current) clearTimeout(t);
+      shuffleTimersRef.current = [];
+    },
+    [],
+  );
 
   return {
     subreddits: CURATED_SUBREDDITS,
@@ -269,5 +366,7 @@ export function useOffice(modalOpen: boolean): OfficeApi {
     policy,
     setPolicy,
     resetLayout,
+    shuffling,
+    arriving,
   };
 }

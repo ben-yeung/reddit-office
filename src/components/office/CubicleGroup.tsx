@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { AnimatePresence } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import type { Cubicle as CubicleModel, Subreddit, Worker as WorkerModel } from "@/lib/domain/types";
 import type { Pulse } from "@/lib/office/useOffice";
 import { seatPosition, type Bounds } from "@/lib/data/layout";
@@ -15,6 +15,8 @@ interface Props {
   /** Cubicle-grid perimeter a departing worker walks out to before fading. */
   bounds: Bounds;
   animate: boolean;
+  /** True during a post-shuffle arrival: new workers walk in from the grid edge. */
+  enter: boolean;
   onSelect: (worker: WorkerModel) => void;
 }
 
@@ -35,6 +37,7 @@ function CubicleGroupInner({
   pulses,
   bounds,
   animate,
+  enter,
   onSelect,
 }: Props) {
   // Precompute each worker's local seat + appearance once, shared by both layers.
@@ -51,7 +54,15 @@ function CubicleGroupInner({
   });
 
   return (
-    <g transform={`translate(${cubicle.position.x} ${cubicle.position.y})`}>
+    // Positioned via animatable x/y (not a static transform) so that on a shuffle
+    // - once the old roster has walked out - the empty cubicle slides to its new
+    // grid cell instead of teleporting. `initial={false}` skips this on first
+    // paint; between data snapshots the position is unchanged, so it's inert.
+    <motion.g
+      initial={false}
+      animate={{ x: cubicle.position.x, y: cubicle.position.y }}
+      transition={{ duration: 0.7, ease: "easeInOut" }}
+    >
       <Cubicle cubicle={cubicle} subreddit={subreddit} workerCount={workers.length} />
 
       {/* Desk fixtures, drawn behind every body so a newly-seated worker sits in
@@ -83,11 +94,12 @@ function CubicleGroupInner({
             color={subreddit.color}
             pulse={pulses[worker.id]}
             animate={animate}
+            enter={enter}
             onSelect={onSelect}
           />
         ))}
       </AnimatePresence>
-    </g>
+    </motion.g>
   );
 }
 

@@ -4,25 +4,26 @@ import { hashString, mulberry32, pick, range } from "@/lib/util/rng";
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-/** Walk-out pace bounds (seconds). A far edge takes longer, but never crawls or
- *  blinks away. WALKOUT_MAX_S also sizes the roster departure lock in useOffice
- *  so an in-flight walk can't be cancelled by a jittery re-selection. */
+/** Walk pace bounds (seconds). A far edge takes longer, but never crawls or
+ *  blinks away. Shared by the exit walk and its mirror-image entrance walk.
+ *  WALKOUT_MAX_S also sizes the roster departure lock in useOffice so an
+ *  in-flight walk can't be cancelled by a jittery re-selection. */
 export const WALKOUT_MIN_S = 1.8;
 export const WALKOUT_MAX_S = 4.5;
 
-/** Fraction of the walk after which the worker starts fading out (fades over the
- *  final stretch as it reaches the edge, like the ambient hallway NPCs). */
+/** Fraction of the walk after which a departing worker starts fading out (fades
+ *  over the final stretch as it reaches the edge, like the ambient hallway NPCs).
+ *  An arriving worker fades in over the mirror-image opening stretch. */
 const FADE_START = 0.82;
 
 /**
- * A departing worker's exit walk, as framer-motion keyframes in the cubicle's
- * local space (the worker group is translated to `cubicle.position`).
+ * A worker's aisle walk, as framer-motion keyframes in the cubicle's local space
+ * (the worker group is translated to `cubicle.position`).
  *
  * `x`/`y` are position keyframes sampled at `times` (distance-proportional, so a
  * constant/linear pace gives even speed through every corridor). `opacity` is a
- * separate track on `opacityTimes` - held full, then a single smooth fade over
- * the final stretch - so the fade is continuous rather than stepping at each
- * path waypoint.
+ * separate track on `opacityTimes` - a single smooth fade over one end of the
+ * walk - so the fade is continuous rather than stepping at each path waypoint.
  */
 export interface WalkOut {
   x: number[];
@@ -34,25 +35,19 @@ export interface WalkOut {
 }
 
 /**
- * The path a replaced worker takes when they leave: get up from the desk, step
- * out through the cubicle's open bottom into the aisle, then follow the hallway
- * grid to a random edge of the cubicle grid and fade out there - the same
- * perimeter the ambient hallway NPCs expire at, so departing workers stop at the
- * grid rather than overlapping the decorative structures around it. `bounds` is
- * the cubicle-grid extent (`worldBounds(layout, 0)`).
+ * The world-space waypoints between a worker's seat and a random edge of the
+ * cubicle grid, ordered seat -> edge. Manhattan routing along the aisle
+ * center-lines (the `GAP`-wide gaps between cubicles), so the walk never cuts
+ * across another cubicle's footprint. Cubicles sit on a grid at
+ * `col*CELL_W, row*CELL_H`, walled on three sides with an open bottom, so the
+ * doorway is always the horizontal aisle just below the cubicle; from there the
+ * route either runs along that aisle to the left/right edge, or hops to a
+ * neighbouring vertical aisle and follows it to the top/bottom edge.
  *
- * Routing is Manhattan along the aisle center-lines (the `GAP`-wide gaps between
- * cubicles), so the walk never cuts across another cubicle's footprint. Cubicles
- * sit on a grid at `col*CELL_W, row*CELL_H`, walled on three sides with an open
- * bottom, so the doorway is always the horizontal aisle just below the cubicle;
- * from there the worker either strolls along that aisle to the left/right edge,
- * or hops to a neighbouring vertical aisle and follows it to the top/bottom edge.
- *
- * Deterministic per post id, so a given worker always leaves the same way and
- * the path stays stable across the re-renders AnimatePresence drives during the
- * exit.
+ * Deterministic per post id, so a given worker always takes the same route and
+ * the path stays stable across the re-renders AnimatePresence drives.
  */
-export function walkOut(id: string, seat: Vec2, cubicle: Cubicle, bounds: Bounds): WalkOut {
+function aislePath(id: string, seat: Vec2, cubicle: Cubicle, bounds: Bounds): Vec2[] {
   const rng = mulberry32(hashString(id) ^ 0x9e3779b9);
   const { position: pos } = cubicle;
 
@@ -94,9 +89,17 @@ export function walkOut(id: string, seat: Vec2, cubicle: Cubicle, bounds: Bounds
     pts.push({ x: vertAisleX, y: edge === "top" ? bounds.minY : bounds.maxY });
   }
 
-  // To cubicle-local space, with times proportional to distance so a linear ease
-  // yields an even walking pace through every segment (no easing pauses at the
-  // corners). Opacity is a separate track - full, then one smooth fade at the end.
+  return pts;
+}
+
+/**
+ * Turn an ordered list of world-space waypoints into framer-motion keyframes in
+ * the cubicle's local space. `times` are distance-proportional so a linear ease
+ * yields an even walking pace through every segment (no easing pauses at the
+ * corners). `opacity`/`opacityTimes` are supplied by the caller so the exit can
+ * fade out at the end while the entrance fades in at the start.
+ */
+function toWalk(pts: Vec2[], pos: Vec2, opacity: number[], opacityTimes: number[]): WalkOut {
   const x = pts.map((p) => p.x - pos.x);
   const y = pts.map((p) => p.y - pos.y);
   const cumulative = [0];
@@ -107,13 +110,38 @@ export function walkOut(id: string, seat: Vec2, cubicle: Cubicle, bounds: Bounds
   }
   const total = cumulative[cumulative.length - 1] || 1;
   const times = cumulative.map((d) => d / total);
-
   return {
     x,
     y,
     times,
-    opacity: [1, 1, 0],
-    opacityTimes: [0, FADE_START, 1],
+    opacity,
+    opacityTimes,
     duration: clamp(total / 220, WALKOUT_MIN_S, WALKOUT_MAX_S),
   };
+}
+
+/**
+ * A departing worker's exit walk: get up from the desk, step out through the
+ * cubicle's open bottom into the aisle, follow the hallway grid to a random edge
+ * of the cubicle grid, and fade out there. `bounds` is the cubicle-grid extent
+ * (`worldBounds(layout, 0)`). See {@link aislePath}.
+ */
+export function walkOut(id: string, seat: Vec2, cubicle: Cubicle, bounds: Bounds): WalkOut {
+  const pts = aislePath(id, seat, cubicle, bounds);
+  // Held full, then one smooth fade over the final stretch as it reaches the edge.
+  return toWalk(pts, cubicle.position, [1, 1, 0], [0, FADE_START, 1]);
+}
+
+/**
+ * An arriving worker's entrance walk - the mirror image of {@link walkOut}. The
+ * worker fades in at a random grid edge and strolls the aisles inward to its
+ * seat, so on a shuffle the new roster files into the reconfigured office rather
+ * than popping in at the desks. Same deterministic route as the exit (reversed),
+ * so the walk-in reads as the reverse of a walk-out.
+ */
+export function walkIn(id: string, seat: Vec2, cubicle: Cubicle, bounds: Bounds): WalkOut {
+  // Reverse the seat -> edge route so it runs edge -> seat.
+  const pts = aislePath(id, seat, cubicle, bounds).reverse();
+  // Fade in over the opening stretch (as it steps in from the edge), then hold full.
+  return toWalk(pts, cubicle.position, [0, 1, 1], [0, 1 - FADE_START, 1]);
 }
