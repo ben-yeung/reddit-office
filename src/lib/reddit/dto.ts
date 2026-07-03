@@ -3,7 +3,7 @@
  * (auth context, demo data source). Pure types + no server-only imports, so
  * this module is safe to import from client components.
  */
-import type { PostKind, Subreddit } from "@/lib/domain/types";
+import type { PostKind, PostVideo, Subreddit } from "@/lib/domain/types";
 
 /** Identifies the `postMessage` the OAuth popup sends back to the opener. */
 export const AUTH_MESSAGE_SOURCE = "reddit-office-auth";
@@ -27,6 +27,8 @@ export interface RedditPostDTO {
   kind: PostKind;
   /** Preview/content image URL for image and link posts, when Reddit provides one. */
   image?: string;
+  /** Playable sources for video posts (v.redd.it), when Reddit provides them. */
+  video?: PostVideo;
   /** External domain for link posts, e.g. "themirror.com". */
   linkDomain?: string;
   /** Post flair text, when set. */

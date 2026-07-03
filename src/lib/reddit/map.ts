@@ -2,14 +2,33 @@
  * Map Reddit's listing JSON into our normalized DTOs. Isolating the API shape
  * here keeps the rest of the code decoupled from Reddit's field names.
  */
-import type { PostKind } from "@/lib/domain/types";
+import type { PostKind, PostVideo } from "@/lib/domain/types";
 import type { RedditCommentDTO, RedditPostDTO } from "./dto";
+import { renderRedditEmoji } from "./emoji";
 
 /** A single preview rendition Reddit offers for a link's media. */
 interface RedditImageSource {
   url?: string;
   width?: number;
   height?: number;
+}
+
+/** Reddit-hosted video (v.redd.it): DASH/HLS manifests + a progressive mp4. */
+interface RedditVideo {
+  /** Progressive mp4 (usually video-only for hosted clips). */
+  fallback_url?: string;
+  /** HLS playlist muxing the separate audio track back in. */
+  hls_url?: string;
+  width?: number;
+  height?: number;
+  /** Present on newer payloads; older ones omit it (audio inferred from is_gif). */
+  has_audio?: boolean;
+  /** A silent looping clip (converted gif) - no audio track exists. */
+  is_gif?: boolean;
+}
+
+interface RedditMedia {
+  reddit_video?: RedditVideo;
 }
 
 /** The subset of a Reddit `t3` (link) object we consume. */
@@ -38,8 +57,20 @@ interface RedditLink {
   /** Post flair text, when set. */
   link_flair_text?: string | null;
   is_gallery?: boolean;
+  is_video?: boolean;
   /** Generated previews; URLs are HTML-escaped (`&amp;`). */
-  preview?: { enabled?: boolean; images?: Array<{ source?: RedditImageSource }> };
+  preview?: {
+    enabled?: boolean;
+    images?: Array<{ source?: RedditImageSource }>;
+    /** A reddit-hosted playable version of an external gif/video link. */
+    reddit_video_preview?: RedditVideo;
+  };
+  /** Reddit-hosted media (v.redd.it video, when the post is is_video). */
+  media?: RedditMedia;
+  /** Same as `media` but from the HTTPS-safe payload; used as a fallback. */
+  secure_media?: RedditMedia;
+  /** For crossposts, the original post carries the hosted video. */
+  crosspost_parent_list?: RedditLink[];
   /** Inline/gallery media, keyed by media id; URLs are HTML-escaped. */
   media_metadata?: MediaMetadata;
 }
@@ -134,9 +165,38 @@ function imageOf(link: RedditLink): string | undefined {
   return undefined;
 }
 
+/**
+ * Locate the reddit-hosted video for a post, wherever it lives: directly on the
+ * post (`media`/`secure_media`), on the original post of a crosspost, or as the
+ * hosted preview of an external gif/video link (`reddit_video_preview`).
+ */
+function rawVideo(link: RedditLink): RedditVideo | undefined {
+  return (
+    link.media?.reddit_video ??
+    link.secure_media?.reddit_video ??
+    link.crosspost_parent_list?.[0]?.media?.reddit_video ??
+    link.preview?.reddit_video_preview
+  );
+}
+
+/** Normalize a post's hosted video into playable sources, if it has one. */
+function videoOf(link: RedditLink): PostVideo | undefined {
+  const rv = rawVideo(link);
+  if (!rv?.fallback_url) return undefined;
+  return {
+    hls: rv.hls_url ? unescapeHtml(rv.hls_url) : undefined,
+    fallback: unescapeHtml(rv.fallback_url),
+    width: rv.width ?? 0,
+    height: rv.height ?? 0,
+    // Older payloads omit has_audio; a converted gif never has an audio track.
+    hasAudio: rv.has_audio ?? !rv.is_gif,
+  };
+}
+
 /** Classify how the post should render (mirrors Reddit's `post_hint`). */
 function kindOf(link: RedditLink): PostKind {
   if (link.is_self) return "text";
+  if (rawVideo(link)?.fallback_url) return "video";
   if (link.is_gallery) return "image";
   if (link.post_hint === "image") return "image";
   const url = link.url_overridden_by_dest || link.url;
@@ -167,15 +227,18 @@ export function mapListing(json: unknown, subredditId: string, limit: number): R
     const d = child.data;
     if (d.stickied || d.over_18) continue;
     const kind = kindOf(d);
-    const flair = d.link_flair_text?.trim();
+    // Snoo emoji shortcodes (`:snoo_hearteyes:`) show up in both flair and the
+    // occasional title; translate them to plain emoji so tags read cleanly.
+    const flair = renderRedditEmoji(d.link_flair_text?.trim() ?? "", true);
     posts.push({
       id: d.name,
       subredditId,
-      title: d.title,
+      title: renderRedditEmoji(d.title),
       author: `u/${d.author}`,
       body: bodyOf(d),
       kind,
       image: imageOf(d),
+      video: kind === "video" ? videoOf(d) : undefined,
       linkDomain: kind === "link" ? d.domain : undefined,
       flair: flair ? flair : undefined,
       permalink: `https://www.reddit.com${d.permalink}`,

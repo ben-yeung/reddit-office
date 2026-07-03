@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import ReactMarkdown from "react-markdown";
@@ -8,7 +8,39 @@ import remarkGfm from "remark-gfm";
 import type { Subreddit, Worker } from "@/lib/domain/types";
 import type { DemoCommentsPayload } from "@/lib/reddit/dto";
 import { useDialog } from "@/lib/util/useDialog";
+import { VideoPlayer } from "./VideoPlayer";
 import styles from "./WorkerModal.module.css";
+
+/**
+ * A skeleton block's vertical pitch: its own height (padding + three shimmer
+ * bars ≈ 64px) plus the comment column's 10px flex gap. Kept in sync with the
+ * `.skeleton` / `.comments` rules so the loading state can measure the column
+ * and render exactly enough placeholders to fill it.
+ */
+const SKELETON_PITCH = 74;
+
+/**
+ * Measure the comment column while it's loading and report how many skeleton
+ * placeholders it takes to fill its height (re-measured on resize), so the
+ * loading state never leaves a short stub of placeholders above empty space.
+ */
+function useSkeletonFill(active: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [count, setCount] = useState(6);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!active || !el) return;
+    const measure = () => {
+      const h = el.clientHeight;
+      if (h > 0) setCount(Math.max(3, Math.ceil(h / SKELETON_PITCH)));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [active]);
+  return { ref, count };
+}
 
 interface CommentItem {
   id: string;
@@ -329,6 +361,10 @@ export function WorkerModal({ worker, subreddit, now, onClose }: Props) {
   const [comments, setComments] = useState<CommentsState>({ status: "loading" });
   // An embedded link awaiting confirmation before opening in a new tab.
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);
+  // How many loading skeletons it takes to fill the comment column's height.
+  const { ref: skeletonRef, count: skeletonCount } = useSkeletonFill(
+    comments.status === "loading",
+  );
 
   // Load the post's top-upvoted comments (demo app-token endpoint). Falls back
   // to a deterministic mock preview when live comments aren't available.
@@ -356,7 +392,8 @@ export function WorkerModal({ worker, subreddit, now, onClose }: Props) {
 
   const avatarLetter = subreddit.name.charAt(0).toUpperCase();
   // Body and image are independent: a post can have selftext, an image, or both.
-  const hasImage = Boolean(worker.image) && imageOk;
+  const hasVideo = worker.kind === "video" && Boolean(worker.video);
+  const hasImage = !hasVideo && Boolean(worker.image) && imageOk;
   const isLink = worker.kind === "link";
   const showBody = worker.body.trim().length > 0;
   const awards = 1 + (hash(worker.id) % 9);
@@ -423,6 +460,17 @@ export function WorkerModal({ worker, subreddit, now, onClose }: Props) {
 
           {showBody && (
             <Markdown source={worker.body} className={styles.body} onLinkClick={setPendingUrl} />
+          )}
+
+          {hasVideo && (
+            <figure className={styles.media}>
+              <VideoPlayer
+                className={styles.video}
+                video={worker.video!}
+                poster={worker.image}
+                title={worker.title}
+              />
+            </figure>
           )}
 
           {hasImage && (
@@ -520,8 +568,8 @@ export function WorkerModal({ worker, subreddit, now, onClose }: Props) {
               Comments · {worker.comments.toLocaleString()}
             </div>
             {comments.status === "loading" ? (
-              <div className={styles.comments}>
-                {Array.from({ length: 5 }).map((_, i) => (
+              <div ref={skeletonRef} className={`${styles.comments} ${styles.commentsLoading}`}>
+                {Array.from({ length: skeletonCount }).map((_, i) => (
                   <div key={i} className={styles.skeleton}>
                     <div className={styles.skelMeta} />
                     <div className={styles.skelLine} />

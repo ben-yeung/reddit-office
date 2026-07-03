@@ -159,6 +159,16 @@
   max-height: 56vh;
   object-fit: cover;
 }
+.video {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  /* Letterbox against black so portrait clips (720x1280) stay fully visible
+     within the height cap instead of cropping. aspect-ratio is set inline from
+     the source's intrinsic dimensions to reserve space and avoid layout shift. */
+  object-fit: contain;
+  background: #000;
+}
 .linkBar {
   position: absolute;
   left: 12px;
@@ -536,7 +546,13 @@
   color: var(--ink-dim);
   font-size: 0.85rem;
 }
+/* The loading column is filled with exactly enough skeletons to cover its
+   height; clip the last (overflowing) one instead of showing a scrollbar. */
+.commentsLoading {
+  overflow: hidden;
+}
 .skeleton {
+  flex: none;
   background: rgba(255, 255, 255, 0.03);
   border-radius: 6px;
   padding: 9px 12px;
