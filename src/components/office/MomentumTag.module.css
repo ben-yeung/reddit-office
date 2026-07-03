@@ -18,7 +18,8 @@
   font: inherit;
   font-size: 0.76rem;
   font-weight: 600;
-  line-height: 1;
+  /* >1 so the value/label glyphs are never clipped by the tight line box. */
+  line-height: 1.15;
   cursor: pointer;
   transition:
     background 0.14s ease,
@@ -61,12 +62,14 @@
 .pop {
   position: absolute;
   top: calc(100% + 8px);
-  left: 0;
+  /* Anchored to the tag's right edge: the tag sits at the top-right of the post
+     area, so the panel opens leftward/down and never spills past the edge. */
+  right: 0;
   z-index: 20;
   width: 300px;
   max-width: min(300px, 78vw);
   padding: 13px 14px 14px;
-  transform-origin: top left;
+  transform-origin: top right;
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: 12px;
@@ -109,7 +112,7 @@
 
 .readout {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: 9px;
   margin-top: 10px;
 }
@@ -118,13 +121,8 @@
   color: var(--tier);
   font-size: 1.6rem;
   font-weight: 800;
-  line-height: 1;
+  line-height: 1.2;
   font-variant-numeric: tabular-nums;
-}
-.readoutSub {
-  color: var(--ink-dim);
-  font-size: 0.74rem;
-  line-height: 1.3;
 }
 
 /* --- gauge ---------------------------------------------------------------- */
@@ -231,6 +229,7 @@
   color: var(--ink);
   font-size: 0.72rem;
   font-weight: 600;
+  line-height: 1.3;
 }
 .weightPct {
   color: var(--tier);
@@ -240,16 +239,6 @@
 .weightPlus {
   color: var(--ink-dim);
   font-weight: 700;
-}
-
-/* On narrow viewports the modal stacks; keep the popover from spilling off the
-   left edge by letting it sit under the tag but shift right if needed. */
-@media (max-width: 480px) {
-  .pop {
-    left: auto;
-    right: 0;
-    transform-origin: top right;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

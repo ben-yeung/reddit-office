@@ -20,8 +20,6 @@ interface Tier {
   label: string;
   /** A theme-aware CSS colour used to tint the tag + gauge marker. */
   color: string;
-  /** One-line gloss of what this band means, shown in the popover. */
-  blurb: string;
 }
 
 /**
@@ -31,29 +29,10 @@ interface Tier {
  * are display-only bands tuned to read cleanly around "normal".
  */
 function tierFor(momentum: number): Tier {
-  if (momentum < 0.7)
-    return {
-      label: "Cooling",
-      color: "var(--ink-dim)",
-      blurb: "Losing pace - gaining slower than the room right now.",
-    };
-  if (momentum < 1.4)
-    return {
-      label: "Steady",
-      color: "#4a90d9",
-      blurb: "Tracking its subreddit's normal pace.",
-    };
-  if (momentum < SURGE_MOMENTUM)
-    return {
-      label: "Rising",
-      color: "#e8a53c",
-      blurb: "Climbing noticeably faster than the room.",
-    };
-  return {
-    label: "Surging",
-    color: "var(--accent)",
-    blurb: "Blowing up - well past its subreddit's surge line.",
-  };
+  if (momentum < 0.7) return { label: "Cooling", color: "var(--ink-dim)" };
+  if (momentum < 1.4) return { label: "Steady", color: "#4a90d9" };
+  if (momentum < SURGE_MOMENTUM) return { label: "Rising", color: "#e8a53c" };
+  return { label: "Surging", color: "var(--accent)" };
 }
 
 /** Percentage offset along the gauge track for a momentum value. */
@@ -182,7 +161,6 @@ export function MomentumTag({ momentum, subredditName }: Props) {
 
             <div className={styles.readout}>
               <span className={styles.bigValue}>{momentum.toFixed(2)}×</span>
-              <span className={styles.readoutSub}>{tier.blurb}</span>
             </div>
 
             {/* Where this post sits between "normal pace" (1×) and the surge
@@ -216,9 +194,7 @@ export function MomentumTag({ momentum, subredditName }: Props) {
 
             <p className={styles.explain}>
               Momentum compares how fast this post is gaining upvotes and comments
-              against {subredditName}&apos;s usual pace. <strong>1×</strong> is
-              business as usual; higher means it&apos;s climbing faster than the
-              room.
+              against {subredditName}&apos;s usual pace.
             </p>
 
             <div className={styles.weights}>

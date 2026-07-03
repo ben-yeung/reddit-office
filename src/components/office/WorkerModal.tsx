@@ -435,11 +435,14 @@ export function WorkerModal({ worker, subreddit, now, onClose }: Props) {
               <div className={styles.headBottom}>
                 <span className={styles.author}>{worker.author}</span>
                 {worker.trending && <span className={styles.trendTag}>trending</span>}
-                <MomentumTag
-                  momentum={worker.momentum}
-                  subredditName={subreddit.displayName}
-                />
               </div>
+            </div>
+            {/* Pinned to the top-right of the post area, clear of the author line. */}
+            <div className={styles.momentumSlot}>
+              <MomentumTag
+                momentum={worker.momentum}
+                subredditName={subreddit.displayName}
+              />
             </div>
           </header>
 
