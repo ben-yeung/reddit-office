@@ -118,6 +118,23 @@
   background: rgba(255, 255, 255, 0.1);
 }
 
+/* Authenticated-only: reopen the subreddit picker. Accent-outlined so it reads as
+   the primary office action, distinct from the neutral "shuffle" button. */
+.editSubs {
+  margin-top: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--accent-soft);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.editSubs:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
 /* --- HUD (bottom-right) --- */
 .hud {
   position: absolute;

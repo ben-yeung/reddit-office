@@ -3,7 +3,7 @@
  * here keeps the rest of the code decoupled from Reddit's field names.
  */
 import type { PostKind, PostVideo } from "@/lib/domain/types";
-import type { RedditCommentDTO, RedditPostDTO } from "./dto";
+import type { RedditCommentDTO, RedditPostDTO, SubscribedSubredditDTO } from "./dto";
 import { renderRedditEmoji } from "./emoji";
 
 /** A single preview rendition Reddit offers for a link's media. */
@@ -328,4 +328,48 @@ export function mapAboutIcon(json: unknown): string | undefined {
   const data = (json as RedditAbout).data;
   const raw = (data?.community_icon || data?.icon_img || "").trim();
   return raw ? unescapeHtml(raw) : undefined;
+}
+
+/** The subset of a subreddit (`t5`) object we consume from a subscription listing. */
+interface RedditSubredditData {
+  /** Fullname id, e.g. "t5_2fwo". */
+  name: string;
+  /** Bare name, e.g. "programming". */
+  display_name: string;
+  /** Prefixed form, e.g. "r/programming". */
+  display_name_prefixed?: string;
+  community_icon?: string;
+  icon_img?: string;
+  subscribers?: number;
+  over_18?: boolean;
+}
+
+interface SubredditListing {
+  data?: { children?: Array<{ kind: string; data: RedditSubredditData }> };
+}
+
+/**
+ * Map a `/subreddits/mine/subscriber` listing page into the picker's subreddit
+ * DTOs. Skips malformed entries (a subscription is occasionally missing a name)
+ * and prefers the modern styled `community_icon`, keeping its query params, over
+ * the classic `icon_img`. Ordering is left to the caller.
+ */
+export function mapSubscribedSubreddits(json: unknown): SubscribedSubredditDTO[] {
+  const children = (json as SubredditListing | null)?.data?.children ?? [];
+  const out: SubscribedSubredditDTO[] = [];
+  for (const child of children) {
+    if (child.kind !== "t5") continue;
+    const d = child.data;
+    if (!d?.name || !d.display_name) continue;
+    const rawIcon = (d.community_icon || d.icon_img || "").trim();
+    out.push({
+      id: d.name,
+      name: d.display_name,
+      displayName: d.display_name_prefixed || `r/${d.display_name}`,
+      iconUrl: rawIcon ? unescapeHtml(rawIcon) : undefined,
+      subscribers: d.subscribers ?? 0,
+      over18: Boolean(d.over_18),
+    });
+  }
+  return out;
 }

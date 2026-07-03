@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CURATED_SUBREDDITS } from "@/lib/data/curatedSubreddits";
 import { generateLayout, LAYOUT_VERSION } from "@/lib/data/layout";
-import { RedditDemoDataSource } from "@/lib/data/RedditDemoDataSource";
+import {
+  PollingOfficeDataSource,
+  type OfficePayloadFetcher,
+} from "@/lib/data/PollingOfficeDataSource";
 import { DEFAULT_POLICY } from "@/lib/domain/constants";
 import { WALKOUT_MAX_S } from "@/lib/office/walkout";
 import { loadPersisted, savePersisted, clearPersisted } from "@/lib/persistence/localStore";
@@ -98,6 +100,21 @@ export interface OfficeApi {
 }
 
 /**
+ * What office to run. The demo office and each authenticated user's office differ
+ * only in these three inputs; everything downstream is identical. Treated as fixed
+ * for the lifetime of the hook - the office is remounted (fresh key) when its
+ * identity changes, so the values are stable per mount.
+ */
+export interface OfficeConfig {
+  /** The subreddit set (drives the layout + first paint; source may enrich with icons). */
+  subreddits: Subreddit[];
+  /** Fetches the office payload each poll (demo endpoint vs authenticated endpoint). */
+  fetchPayload: OfficePayloadFetcher;
+  /** localStorage namespace so distinct offices don't clobber each other's layout/policy. */
+  storageKey: string;
+}
+
+/**
  * Owns the office data lifecycle: resolves the persisted layout/policy, runs the
  * (mock) DataSource, and surfaces snapshots + per-worker event pulses to React.
  * The DataSource is created only on the client (timers, Date.now, localStorage).
@@ -110,18 +127,18 @@ export interface OfficeApi {
  * backdrop, so the modal's own animation stays smooth even without GPU compositing.
  * `pauseOnModal` is off by default, so normally data flows through uninterrupted.
  */
-export function useOffice(modalOpen: boolean): OfficeApi {
-  const [layout, setLayout] = useState<Layout>(() =>
-    generateLayout(CURATED_SUBREDDITS, DEFAULT_SEED),
-  );
+export function useOffice(modalOpen: boolean, config: OfficeConfig): OfficeApi {
+  const { subreddits: initialSubs, fetchPayload, storageKey } = config;
+
+  const [layout, setLayout] = useState<Layout>(() => generateLayout(initialSubs, DEFAULT_SEED));
   const [policy, setPolicyState] = useState<OfficePolicy>(DEFAULT_POLICY);
-  // Starts as the static curated list (drives layout + first paint); the demo
-  // source later emits the same subs enriched with community icons.
-  const [subreddits, setSubreddits] = useState<Subreddit[]>(CURATED_SUBREDDITS);
+  // Starts as the given subreddit set (drives layout + first paint); the source
+  // later emits the same subs enriched with community icons.
+  const [subreddits, setSubreddits] = useState<Subreddit[]>(initialSubs);
   const [workersByCubicle, setWorkersByCubicle] = useState<WorkersByCubicle>({});
   const [pulses, setPulses] = useState<Record<string, Pulse>>({});
 
-  const sourceRef = useRef<RedditDemoDataSource | null>(null);
+  const sourceRef = useRef<PollingOfficeDataSource | null>(null);
   const seqRef = useRef(0);
   // Departure-commit bookkeeping (see commitDepartures): ids currently walking
   // out (id -> unlock time) and the ids shown in the last snapshot.
@@ -138,7 +155,7 @@ export function useOffice(modalOpen: boolean): OfficeApi {
     departingRef.current.clear();
     prevShownRef.current.clear();
     pendingSnapshotRef.current = null;
-    const src = new RedditDemoDataSource(CURATED_SUBREDDITS, l, p);
+    const src = new PollingOfficeDataSource(initialSubs, l, p, fetchPayload);
     sourceRef.current = src;
     src.start({
       onSnapshot: (s) => {
@@ -177,11 +194,11 @@ export function useOffice(modalOpen: boolean): OfficeApi {
         });
       },
     });
-  }, []);
+  }, [initialSubs, fetchPayload]);
 
   // Resolve persisted state and start the source once, on mount.
   useEffect(() => {
-    const persisted = loadPersisted();
+    const persisted = loadPersisted(storageKey);
     // Merge a persisted policy over the defaults so older saves gain new fields
     // (theme, ambient, any new event toggles).
     const persistedPolicy = persisted?.policy
@@ -200,7 +217,7 @@ export function useOffice(modalOpen: boolean): OfficeApi {
     const persistedLayout =
       persisted?.layout &&
       persisted.layout.version === LAYOUT_VERSION &&
-      layoutMatchesSubreddits(persisted.layout, CURATED_SUBREDDITS)
+      layoutMatchesSubreddits(persisted.layout, initialSubs)
         ? persisted.layout
         : null;
     const finalLayout = persistedLayout ?? layout;
@@ -215,7 +232,7 @@ export function useOffice(modalOpen: boolean): OfficeApi {
     if (persistedPolicy) {
       setPolicyState(persistedPolicy);
     }
-    savePersisted({ layout: finalLayout, policy: finalPolicy });
+    savePersisted(storageKey, { layout: finalLayout, policy: finalPolicy });
     startSource(finalLayout, finalPolicy);
     return () => sourceRef.current?.stop();
     // Intentionally run once; startSource is stable.
@@ -244,26 +261,29 @@ export function useOffice(modalOpen: boolean): OfficeApi {
     }
   }, [paused]);
 
-  const setPolicy = useCallback((next: OfficePolicy) => {
-    setPolicyState(next);
-    sourceRef.current?.setPolicy(next);
-    setLayout((currentLayout) => {
-      savePersisted({ layout: currentLayout, policy: next });
-      return currentLayout;
-    });
-  }, []);
+  const setPolicy = useCallback(
+    (next: OfficePolicy) => {
+      setPolicyState(next);
+      sourceRef.current?.setPolicy(next);
+      setLayout((currentLayout) => {
+        savePersisted(storageKey, { layout: currentLayout, policy: next });
+        return currentLayout;
+      });
+    },
+    [storageKey],
+  );
 
   const resetLayout = useCallback(() => {
-    clearPersisted();
+    clearPersisted(storageKey);
     const seed = Math.floor(Math.random() * 1_000_000_000);
-    const next = generateLayout(CURATED_SUBREDDITS, seed);
+    const next = generateLayout(initialSubs, seed);
     setLayout(next);
     setPolicyState((currentPolicy) => {
-      savePersisted({ layout: next, policy: currentPolicy });
+      savePersisted(storageKey, { layout: next, policy: currentPolicy });
       startSource(next, currentPolicy);
       return currentPolicy;
     });
-  }, [startSource]);
+  }, [startSource, storageKey, initialSubs]);
 
   return {
     subreddits,

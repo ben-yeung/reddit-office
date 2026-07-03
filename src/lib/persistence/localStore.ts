@@ -1,23 +1,25 @@
 import type { Layout, OfficePolicy } from "@/lib/domain/types";
 
 /**
- * Client-side persistence of the office (ADR-0003): the generated Layout and
- * the Office Policy. Kept behind this tiny module so a future per-user store
- * (iteration 2, multi-device) can swap in without touching callers.
+ * Client-side persistence of the office (ADR-0003): the generated Layout and the
+ * Office Policy. Kept behind this tiny module so a future per-user store can swap
+ * in without touching callers.
+ *
+ * The storage key is supplied by the caller so distinct offices don't clobber each
+ * other: the demo office and each authenticated user's office persist under their
+ * own key (see `officeStorageKey`). The `:v2` suffix on those keys marks the
+ * subreddit-id scheme; a mismatched subreddit set is additionally self-healed by
+ * `layoutMatchesSubreddits` at load time.
  */
-// v2: the office subreddit set changed (mock seed -> curated demo subs, ADR-0009),
-// so old persisted layouts reference stale subreddit ids and must be discarded.
-const KEY = "reddit-office:v2";
-
 export interface Persisted {
   layout: Layout;
   policy: OfficePolicy;
 }
 
-export function loadPersisted(): Persisted | null {
+export function loadPersisted(key: string): Persisted | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(KEY);
+    const raw = window.localStorage.getItem(key);
     if (!raw) return null;
     const data = JSON.parse(raw) as Partial<Persisted>;
     if (!data.layout || !data.policy) return null;
@@ -27,19 +29,19 @@ export function loadPersisted(): Persisted | null {
   }
 }
 
-export function savePersisted(p: Persisted): void {
+export function savePersisted(key: string, p: Persisted): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(KEY, JSON.stringify(p));
+    window.localStorage.setItem(key, JSON.stringify(p));
   } catch {
     // ignore quota / privacy-mode errors
   }
 }
 
-export function clearPersisted(): void {
+export function clearPersisted(key: string): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.removeItem(KEY);
+    window.localStorage.removeItem(key);
   } catch {
     // ignore
   }
