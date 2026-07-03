@@ -12,13 +12,12 @@ import { CURATED_SUBREDDITS } from "@/lib/data/curatedSubreddits";
 import { getCredentials } from "./config";
 import { getAppToken } from "./tokens";
 import { redditGet } from "./client";
-import { mapComments, mapListing } from "./map";
-import type { DemoCommentsPayload, DemoOfficePayload, RedditPostDTO } from "./dto";
+import { mapComments } from "./map";
+import { fetchOfficeForSubs } from "./office";
+import type { DemoCommentsPayload, DemoOfficePayload } from "./dto";
 
 /** Shared-cache lifetime. Demo data may be up to this stale - fine, it is a showcase. */
 const DEMO_REVALIDATE = 45; // seconds
-/** Posts fetched per sub: a little headroom above ROSTER_MAX for roster selection. */
-const POSTS_PER_SUB = 12;
 /** Comment-thread cache lifetime (comments move slower than the hot listing). */
 const COMMENTS_REVALIDATE = 120; // seconds
 /** Top-level comments shown per post - threads can run to thousands, so cap hard. */
@@ -26,27 +25,7 @@ const COMMENTS_LIMIT = 20;
 
 async function fetchCuratedOffice(): Promise<DemoOfficePayload> {
   const token = await getAppToken();
-
-  const entries = await Promise.all(
-    CURATED_SUBREDDITS.map(async (sub) => {
-      try {
-        const json = await redditGet<unknown>(`/r/${sub.name}/hot?limit=${POSTS_PER_SUB + 4}`, {
-          token,
-          revalidate: DEMO_REVALIDATE,
-        });
-        return [sub.id, mapListing(json, sub.id, POSTS_PER_SUB)] as const;
-      } catch {
-        // One failing sub should not blank the whole office.
-        return [sub.id, [] as RedditPostDTO[]] as const;
-      }
-    }),
-  );
-
-  return {
-    configured: true,
-    subreddits: CURATED_SUBREDDITS,
-    postsBySub: Object.fromEntries(entries),
-  };
+  return fetchOfficeForSubs(CURATED_SUBREDDITS, token, { postsRevalidate: DEMO_REVALIDATE });
 }
 
 const getCachedCuratedOffice = unstable_cache(fetchCuratedOffice, ["demo-office"], {

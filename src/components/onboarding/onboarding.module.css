@@ -1,0 +1,241 @@
+/* Full-screen onboarding surface. The page never scrolls (globals.css), so the
+   picker owns its own layout and the grid scrolls internally. Uses theme tokens
+   throughout, so it tracks whichever office theme is active. */
+.wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  padding: clamp(12px, 3vw, 40px);
+  background: radial-gradient(circle at 50% 20%, var(--floor-2), var(--page-bg) 75%);
+}
+
+.panel {
+  width: min(1080px, 96vw);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 2px solid var(--panel-border);
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.head {
+  padding: clamp(18px, 2.4vw, 30px) clamp(18px, 2.6vw, 32px) 14px;
+  border-bottom: 1px solid var(--panel-border);
+}
+.title {
+  font-size: clamp(0.95rem, 0.8rem + 0.4vw, 1.3rem);
+  color: var(--ink);
+}
+.subtitle {
+  margin-top: 10px;
+  font-size: 0.9rem;
+  color: var(--ink-dim);
+  line-height: 1.55;
+  max-width: 60ch;
+}
+.subtitle strong {
+  color: var(--accent-soft);
+}
+
+/* --- Search + bulk actions --- */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px clamp(18px, 2.6vw, 32px);
+}
+.search {
+  flex: 1 1 240px;
+  min-width: 0;
+  padding: 0.6em 0.9em;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+.search::placeholder {
+  color: var(--ink-dim);
+}
+.search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.controlActions {
+  display: flex;
+  gap: 8px;
+}
+
+/* --- Grid of subreddits (scrolls) --- */
+.grid {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 232px), 1fr));
+  gap: 10px;
+  padding: 4px clamp(18px, 2.6vw, 32px) 8px;
+  align-content: start;
+}
+.state {
+  grid-column: 1 / -1;
+  padding: 32px 8px;
+  text-align: center;
+  color: var(--ink-dim);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+/* --- One subreddit card (toggle) --- */
+.card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease,
+    opacity 0.12s ease;
+}
+.card:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: var(--wall-hi);
+}
+.card:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+.cardOn {
+  border-color: var(--accent);
+  background: rgba(255, 90, 31, 0.12);
+}
+.cardOn:hover:not(:disabled) {
+  background: rgba(255, 90, 31, 0.18);
+  border-color: var(--accent);
+}
+
+.checkbox {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--wall-hi);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 800;
+  color: #fff;
+  background: transparent;
+}
+.cardOn .checkbox {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.icon,
+.iconLetter {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.iconLetter {
+  display: grid;
+  place-items: center;
+  color: #10131a;
+  font-weight: 800;
+  font-size: 1rem;
+}
+
+.cardText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+.cardName {
+  font-size: 0.9rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cardMeta {
+  font-size: 0.74rem;
+  color: var(--ink-dim);
+}
+
+/* --- Footer: count + actions --- */
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px clamp(18px, 2.6vw, 32px);
+  border-top: 1px solid var(--panel-border);
+}
+.count {
+  font-size: 0.84rem;
+  color: var(--ink-dim);
+}
+.countCap {
+  color: var(--accent-soft);
+  font-weight: 600;
+}
+.footActions {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.ghostBtn {
+  padding: 0.55em 1em;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink-dim);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.ghostBtn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--ink);
+}
+.ghostBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.confirmBtn {
+  padding: 0.6em 1.3em;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.86rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 8px 20px rgba(255, 69, 0, 0.28);
+}
+.confirmBtn:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+.confirmBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}

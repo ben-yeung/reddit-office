@@ -1,0 +1,249 @@
+/* The momentum multiplier as an interactive tag + explanatory popover.
+   `--tier` is set inline per reading and drives the tag tint and gauge marker. */
+.wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+/* --- the tag itself ------------------------------------------------------- */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--tier) 45%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tier) 14%, transparent);
+  color: var(--tier);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  /* >1 so the value/label glyphs are never clipped by the tight line box. */
+  line-height: 1.15;
+  cursor: pointer;
+  transition:
+    background 0.14s ease,
+    border-color 0.14s ease,
+    transform 0.14s ease;
+}
+.tag:hover,
+.tag[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--tier) 22%, transparent);
+  border-color: color-mix(in srgb, var(--tier) 62%, transparent);
+}
+.tag:focus-visible {
+  outline: 2px solid var(--tier);
+  outline-offset: 2px;
+}
+.bolt {
+  flex: none;
+}
+.value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.tagLabel {
+  /* Slightly calmer than the value so the number leads. */
+  opacity: 0.82;
+  font-weight: 600;
+}
+.chevron {
+  flex: none;
+  margin-left: 1px;
+  opacity: 0.72;
+  transition: transform 0.16s ease;
+}
+.chevron[data-open="true"] {
+  transform: rotate(180deg);
+}
+
+/* --- popover -------------------------------------------------------------- */
+.pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  /* Anchored to the tag's right edge: the tag sits at the top-right of the post
+     area, so the panel opens leftward/down and never spills past the edge. */
+  right: 0;
+  z-index: 20;
+  width: 300px;
+  max-width: min(300px, 78vw);
+  padding: 13px 14px 14px;
+  transform-origin: top right;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.5);
+  /* Opaque backing so the blurred office behind the modal never bleeds through
+     the semi-transparent --panel token. */
+  backdrop-filter: blur(8px);
+  cursor: default;
+}
+
+.popHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.popTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.popTitle .bolt {
+  color: var(--tier);
+}
+.tierPill {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tier) 18%, transparent);
+  color: var(--tier);
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.readout {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 10px;
+}
+.bigValue {
+  flex: none;
+  color: var(--tier);
+  font-size: 1.6rem;
+  font-weight: 800;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- gauge ---------------------------------------------------------------- */
+.gauge {
+  margin-top: 16px;
+}
+.track {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink-dim) 26%, transparent);
+}
+.fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--tier) 55%, transparent),
+    var(--tier)
+  );
+}
+/* Faint vertical guides at the "normal" and "surge" landmarks, each labelled
+   above the track. */
+.tick {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  transform: translateX(-1px);
+  background: color-mix(in srgb, var(--ink-dim) 55%, transparent);
+  border-radius: 2px;
+}
+.tick::after {
+  content: attr(data-label);
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  color: var(--ink-dim);
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+/* The post's own position: a ringed dot riding on top of the fill. */
+.marker {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--tier);
+  border: 2px solid var(--panel);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--tier) 70%, transparent);
+}
+.scaleRow {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 7px;
+  color: var(--ink-dim);
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- explanation + weighting --------------------------------------------- */
+.explain {
+  margin-top: 13px;
+  color: var(--ink-dim);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+.explain strong {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.weights {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--panel-border);
+}
+.weightLabel {
+  color: var(--ink-dim);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-right: 1px;
+}
+.weightChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink-dim) 14%, transparent);
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.weightPct {
+  color: var(--tier);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.weightPlus {
+  color: var(--ink-dim);
+  font-weight: 700;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron,
+  .tag {
+    transition: none;
+  }
+}

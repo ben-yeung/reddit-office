@@ -6,7 +6,8 @@ import { useOffice } from "@/lib/office/useOffice";
 import { useCamera } from "@/lib/camera/useCamera";
 import { useElementSize } from "@/lib/util/useElementSize";
 import { officeExtent } from "@/lib/office/decor";
-import type { Worker } from "@/lib/domain/types";
+import type { Subreddit, Worker } from "@/lib/domain/types";
+import type { OfficePayloadFetcher } from "@/lib/data/PollingOfficeDataSource";
 import { OfficeStage } from "./OfficeStage";
 import { WorkerModal } from "./WorkerModal";
 import { useBackgroundMotionPaused } from "./BackgroundMotion";
@@ -20,17 +21,45 @@ interface Selection {
   at: number;
 }
 
+export interface OfficeAppProps {
+  /** The subreddit set this office renders (demo curated list, or the user's picks). */
+  subreddits: Subreddit[];
+  /** Fetches the office payload each poll. Must be stable across renders. */
+  fetchPayload: OfficePayloadFetcher;
+  /** localStorage namespace for this office's layout/policy. */
+  storageKey: string;
+  /** Brand subtitle under the REDDIT OFFICE wordmark, e.g. "demo · top subreddits". */
+  brandSub: string;
+  /**
+   * When provided (authenticated mode), the Office Policy panel offers a
+   * "Reselect subreddits" action that reopens the onboarding picker.
+   */
+  onEditSubreddits?: () => void;
+}
+
 /**
  * Office root: composes the data hook, the camera, pointer/zoom handling, and
  * the overlays. Presentational SVG lives in OfficeStage; this owns interaction.
+ * The same component renders both the demo office and each authenticated user's
+ * office - only the injected data config and branding differ.
  */
-export function OfficeApp() {
+export function OfficeApp({
+  subreddits,
+  fetchPayload,
+  storageKey,
+  brandSub,
+  onEditSubreddits,
+}: OfficeAppProps) {
   // With the `pauseOnModal` policy on, an open modal freezes the office - both
   // the sprite motion (OfficeStage) and the data pipeline (useOffice) - so no
   // motion churns the background behind the modal's blurred backdrop. Off by
   // default, so normally the office keeps living while a modal is open.
   const modalOpen = useBackgroundMotionPaused();
-  const office = useOffice(modalOpen);
+  const officeConfig = useMemo(
+    () => ({ subreddits, fetchPayload, storageKey }),
+    [subreddits, fetchPayload, storageKey],
+  );
+  const office = useOffice(modalOpen, officeConfig);
   const freezeBackground = modalOpen && office.policy.pauseOnModal;
   const containerRef = useRef<HTMLDivElement>(null);
   const size = useElementSize(containerRef);
@@ -119,7 +148,7 @@ export function OfficeApp() {
       <div className={styles.topRight}>
         <div className={styles.brand}>
           <span className={`pixel-font ${styles.brandName}`}>REDDIT OFFICE</span>
-          <span className={styles.brandSub}>demo · top subreddits</span>
+          <span className={styles.brandSub}>{brandSub}</span>
         </div>
         <AuthControl />
       </div>
@@ -131,6 +160,7 @@ export function OfficeApp() {
         onChange={office.setPolicy}
         onReset={office.resetLayout}
         shuffling={office.shuffling}
+        onEditSubreddits={onEditSubreddits}
       />
 
       <Hud

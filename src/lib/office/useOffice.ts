@@ -1,9 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CURATED_SUBREDDITS } from "@/lib/data/curatedSubreddits";
 import { generateLayout, LAYOUT_VERSION } from "@/lib/data/layout";
-import { RedditDemoDataSource } from "@/lib/data/RedditDemoDataSource";
+import {
+  PollingOfficeDataSource,
+  type OfficePayloadFetcher,
+} from "@/lib/data/PollingOfficeDataSource";
 import { DEFAULT_POLICY } from "@/lib/domain/constants";
 import { MIGRATE_MAX_S, WALKOUT_MAX_S } from "@/lib/office/walkout";
 import { loadPersisted, savePersisted } from "@/lib/persistence/localStore";
@@ -137,6 +139,21 @@ export interface OfficeApi {
 }
 
 /**
+ * What office to run. The demo office and each authenticated user's office differ
+ * only in these three inputs; everything downstream is identical. Treated as fixed
+ * for the lifetime of the hook - the office is remounted (fresh key) when its
+ * identity changes, so the values are stable per mount.
+ */
+export interface OfficeConfig {
+  /** The subreddit set (drives the layout + first paint; source may enrich with icons). */
+  subreddits: Subreddit[];
+  /** Fetches the office payload each poll (demo endpoint vs authenticated endpoint). */
+  fetchPayload: OfficePayloadFetcher;
+  /** localStorage namespace so distinct offices don't clobber each other's layout/policy. */
+  storageKey: string;
+}
+
+/**
  * Owns the office data lifecycle: resolves the persisted layout/policy, runs the
  * (mock) DataSource, and surfaces snapshots + per-worker event pulses to React.
  * The DataSource is created only on the client (timers, Date.now, localStorage).
@@ -149,11 +166,14 @@ export interface OfficeApi {
  * backdrop, so the modal's own animation stays smooth even without GPU compositing.
  * `pauseOnModal` is off by default, so normally data flows through uninterrupted.
  */
-export function useOffice(modalOpen: boolean): OfficeApi {
-  const [layout, setLayout] = useState<Layout>(() =>
-    generateLayout(CURATED_SUBREDDITS, DEFAULT_SEED),
-  );
+export function useOffice(modalOpen: boolean, config: OfficeConfig): OfficeApi {
+  const { subreddits: initialSubs, fetchPayload, storageKey } = config;
+
+  const [layout, setLayout] = useState<Layout>(() => generateLayout(initialSubs, DEFAULT_SEED));
   const [policy, setPolicyState] = useState<OfficePolicy>(DEFAULT_POLICY);
+  // Starts as the given subreddit set (drives layout + first paint); the source
+  // later emits the same subs enriched with community icons.
+  const [subreddits, setSubreddits] = useState<Subreddit[]>(initialSubs);
   const [workersByCubicle, setWorkersByCubicle] = useState<WorkersByCubicle>({});
   const [pulses, setPulses] = useState<Record<string, Pulse>>({});
   // `arriving` is true while the office first fills: that batch walks in from the
@@ -165,7 +185,7 @@ export function useOffice(modalOpen: boolean): OfficeApi {
   const [migration, setMigration] = useState<LayoutMigration | null>(null);
   const [shuffling, setShuffling] = useState(false);
 
-  const sourceRef = useRef<RedditDemoDataSource | null>(null);
+  const sourceRef = useRef<PollingOfficeDataSource | null>(null);
   const seqRef = useRef(0);
   // Departure-commit bookkeeping (see commitDepartures): ids currently walking
   // out (id -> unlock time) and the ids shown in the last snapshot.
@@ -187,70 +207,74 @@ export function useOffice(modalOpen: boolean): OfficeApi {
   const migratingRef = useRef(false);
   const migrateTimerRef = useRef<number | null>(null);
 
-  const startSource = useCallback((l: Layout, p: OfficePolicy) => {
-    sourceRef.current?.stop();
-    setWorkersByCubicle({});
-    setPulses({});
-    departingRef.current.clear();
-    prevShownRef.current.clear();
-    pendingSnapshotRef.current = null;
-    arriveArmedRef.current = true; // the first populated snapshot walks the roster in
-    const src = new RedditDemoDataSource(CURATED_SUBREDDITS, l, p);
-    sourceRef.current = src;
-    src.start({
-      onSnapshot: (s) => {
-        // Paused (modal open) or mid-migration: park the raw snapshot; committed on
-        // resume / when the migration settles. Freezing the roster during a shuffle
-        // keeps each worker's old-desk -> new-desk walk from being disrupted by
-        // churn (a worker vanishing mid-walk, or a new one popping in).
-        if (pausedRef.current || migratingRef.current) {
-          pendingSnapshotRef.current = s.workersByCubicle;
-          return;
-        }
-        // First populated snapshot after the source started (initial load, once the
-        // fetch resolves): open the walk-in window so this batch files in from the
-        // hallways. Flag and workers are set together (auto-batched), so these
-        // workers mount with `enter` true; the window then closes and later churn
-        // fades in at the seats as before.
-        if (arriveArmedRef.current && anyWorkers(s.workersByCubicle)) {
-          arriveArmedRef.current = false;
-          setArriving(true);
-          arriveTimerRef.current = window.setTimeout(() => setArriving(false), ARRIVE_WINDOW_MS);
-        }
-        // Commit roster departures so an in-flight walk-out isn't cancelled by a
-        // jittery re-selection (see commitDepartures).
-        setWorkersByCubicle(
-          commitDepartures(
-            s.workersByCubicle,
-            departingRef.current,
-            prevShownRef.current,
-            Date.now(),
-            DEPART_COMMIT_MS,
-          ),
-        );
-      },
-      onEvent: (e) => {
-        // Pulses are one-shot cosmetics; drop any that fire behind a modal.
-        if (pausedRef.current) return;
-        seqRef.current += 1;
-        const seq = seqRef.current;
-        // Pulses are transient, one-shot triggers keyed by worker. Retain only
-        // recent entries so this map can't grow unbounded over a long session.
-        setPulses((prev) => {
-          const next: Record<string, Pulse> = {};
-          for (const [id, p] of Object.entries(prev)) {
-            if (id !== e.workerId && seq - p.seq < PULSE_RETENTION) next[id] = p;
+  const startSource = useCallback(
+    (l: Layout, p: OfficePolicy) => {
+      sourceRef.current?.stop();
+      setWorkersByCubicle({});
+      setPulses({});
+      departingRef.current.clear();
+      prevShownRef.current.clear();
+      pendingSnapshotRef.current = null;
+      arriveArmedRef.current = true; // the first populated snapshot walks the roster in
+      const src = new PollingOfficeDataSource(initialSubs, l, p, fetchPayload);
+      sourceRef.current = src;
+      src.start({
+        onSnapshot: (s) => {
+          // Paused (modal open) or mid-migration: park the raw snapshot; committed on
+          // resume / when the migration settles. Freezing the roster during a shuffle
+          // keeps each worker's old-desk -> new-desk walk from being disrupted by
+          // churn (a worker vanishing mid-walk, or a new one popping in).
+          if (pausedRef.current || migratingRef.current) {
+            pendingSnapshotRef.current = s.workersByCubicle;
+            return;
           }
-          next[e.workerId] = { type: e.type, seq };
-          return next;
-        });
-      },
-    });
-  }, []);
+          // First populated snapshot after the source started (initial load, once the
+          // fetch resolves): open the walk-in window so this batch files in from the
+          // hallways. Flag and workers are set together (auto-batched), so these
+          // workers mount with `enter` true; the window then closes and later churn
+          // fades in at the seats as before.
+          if (arriveArmedRef.current && anyWorkers(s.workersByCubicle)) {
+            arriveArmedRef.current = false;
+            setArriving(true);
+            arriveTimerRef.current = window.setTimeout(() => setArriving(false), ARRIVE_WINDOW_MS);
+          }
+          // Commit roster departures so an in-flight walk-out isn't cancelled by a
+          // jittery re-selection (see commitDepartures).
+          setWorkersByCubicle(
+            commitDepartures(
+              s.workersByCubicle,
+              departingRef.current,
+              prevShownRef.current,
+              Date.now(),
+              DEPART_COMMIT_MS,
+            ),
+          );
+        },
+        onSubreddits: (subs) => setSubreddits(subs),
+        onEvent: (e) => {
+          // Pulses are one-shot cosmetics; drop any that fire behind a modal.
+          if (pausedRef.current) return;
+          seqRef.current += 1;
+          const seq = seqRef.current;
+          // Pulses are transient, one-shot triggers keyed by worker. Retain only
+          // recent entries so this map can't grow unbounded over a long session.
+          setPulses((prev) => {
+            const next: Record<string, Pulse> = {};
+            for (const [id, p] of Object.entries(prev)) {
+              if (id !== e.workerId && seq - p.seq < PULSE_RETENTION) next[id] = p;
+            }
+            next[e.workerId] = { type: e.type, seq };
+            return next;
+          });
+        },
+      });
+    },
+    [initialSubs, fetchPayload],
+  );
 
   // Resolve persisted state and start the source once, on mount.
   useEffect(() => {
-    const persisted = loadPersisted();
+    const persisted = loadPersisted(storageKey);
     // Merge a persisted policy over the defaults so older saves gain new fields
     // (theme, ambient, any new event toggles).
     const persistedPolicy = persisted?.policy
@@ -269,7 +293,7 @@ export function useOffice(modalOpen: boolean): OfficeApi {
     const persistedLayout =
       persisted?.layout &&
       persisted.layout.version === LAYOUT_VERSION &&
-      layoutMatchesSubreddits(persisted.layout, CURATED_SUBREDDITS)
+      layoutMatchesSubreddits(persisted.layout, initialSubs)
         ? persisted.layout
         : null;
     const finalLayout = persistedLayout ?? layout;
@@ -284,7 +308,7 @@ export function useOffice(modalOpen: boolean): OfficeApi {
     if (persistedPolicy) {
       setPolicyState(persistedPolicy);
     }
-    savePersisted({ layout: finalLayout, policy: finalPolicy });
+    savePersisted(storageKey, { layout: finalLayout, policy: finalPolicy });
     startSource(finalLayout, finalPolicy);
     return () => sourceRef.current?.stop();
     // Intentionally run once; startSource is stable.
@@ -313,14 +337,17 @@ export function useOffice(modalOpen: boolean): OfficeApi {
     }
   }, [paused]);
 
-  const setPolicy = useCallback((next: OfficePolicy) => {
-    setPolicyState(next);
-    sourceRef.current?.setPolicy(next);
-    setLayout((currentLayout) => {
-      savePersisted({ layout: currentLayout, policy: next });
-      return currentLayout;
-    });
-  }, []);
+  const setPolicy = useCallback(
+    (next: OfficePolicy) => {
+      setPolicyState(next);
+      sourceRef.current?.setPolicy(next);
+      setLayout((currentLayout) => {
+        savePersisted(storageKey, { layout: currentLayout, policy: next });
+        return currentLayout;
+      });
+    },
+    [storageKey],
+  );
 
   // Shuffle as a migration. The old behaviour swapped the layout and rebuilt the
   // roster in one synchronous burst, so cubicles teleported and a fresh roster
@@ -342,7 +369,7 @@ export function useOffice(modalOpen: boolean): OfficeApi {
     for (const c of layout.cubicles) from[c.subredditId] = c.position;
 
     const seed = Math.floor(Math.random() * 1_000_000_000);
-    const next = generateLayout(CURATED_SUBREDDITS, seed);
+    const next = generateLayout(initialSubs, seed);
 
     // Bump the migration and swap the layout together: the cubicles jump to their
     // new cells and every worker begins walking old desk -> new desk. The roster
@@ -351,7 +378,7 @@ export function useOffice(modalOpen: boolean): OfficeApi {
     setMigration({ seq: migrationSeqRef.current, from });
     setLayout(next);
     setPolicyState((currentPolicy) => {
-      savePersisted({ layout: next, policy: currentPolicy });
+      savePersisted(storageKey, { layout: next, policy: currentPolicy });
       return currentPolicy;
     });
 
@@ -375,7 +402,7 @@ export function useOffice(modalOpen: boolean): OfficeApi {
         pendingSnapshotRef.current = null;
       }
     }, MIGRATE_WINDOW_MS);
-  }, [layout]);
+  }, [layout, storageKey, initialSubs]);
 
   // Clear pending shuffle/arrival timers on unmount so they can't fire against a
   // torn-down tree.
@@ -388,7 +415,7 @@ export function useOffice(modalOpen: boolean): OfficeApi {
   );
 
   return {
-    subreddits: CURATED_SUBREDDITS,
+    subreddits,
     layout,
     workersByCubicle,
     pulses,

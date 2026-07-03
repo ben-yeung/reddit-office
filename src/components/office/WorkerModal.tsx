@@ -11,6 +11,7 @@ import { useDialog } from "@/lib/util/useDialog";
 import { ModalScrim } from "@/components/ui/ModalScrim";
 import { usePauseBackgroundMotion } from "./BackgroundMotion";
 import { VideoPlayer } from "./VideoPlayer";
+import { MomentumTag } from "./MomentumTag";
 import styles from "./WorkerModal.module.css";
 
 /**
@@ -355,6 +356,8 @@ export function WorkerModal({ worker, subreddit, now, onClose }: Props) {
   // Freeze the office behind the blurred backdrop for the modal's whole life.
   usePauseBackgroundMotion();
   const [imageOk, setImageOk] = useState(true);
+  // A subreddit icon that 404s / fails falls back to the letter tile.
+  const [iconOk, setIconOk] = useState(true);
   const [comments, setComments] = useState<CommentsState>({ status: "loading" });
   // An embedded link awaiting confirmation before opening in a new tab.
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);
@@ -388,6 +391,7 @@ export function WorkerModal({ worker, subreddit, now, onClose }: Props) {
   if (typeof document === "undefined") return null;
 
   const avatarLetter = subreddit.name.charAt(0).toUpperCase();
+  const hasIcon = Boolean(subreddit.iconUrl) && iconOk;
   // Body and image are independent: a post can have selftext, an image, or both.
   const hasVideo = worker.kind === "video" && Boolean(worker.video);
   const hasImage = !hasVideo && Boolean(worker.image) && imageOk;
@@ -420,9 +424,24 @@ export function WorkerModal({ worker, subreddit, now, onClose }: Props) {
             the right end of the action row. */}
         <div className={styles.main}>
           <header className={styles.head}>
-            <span className={styles.avatar} style={{ background: subreddit.color }}>
-              {avatarLetter}
-            </span>
+            {hasIcon ? (
+              // Real posts carry the sub's community icon; a broken one falls
+              // back to the letter tile below. Plain <img> avoids next/image
+              // remote-domain config, matching the post-media treatment.
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                className={styles.avatarImg}
+                style={{ background: subreddit.color }}
+                src={subreddit.iconUrl}
+                alt=""
+                loading="lazy"
+                onError={() => setIconOk(false)}
+              />
+            ) : (
+              <span className={styles.avatar} style={{ background: subreddit.color }}>
+                {avatarLetter}
+              </span>
+            )}
             <div className={styles.headText}>
               <div className={styles.headTop}>
                 <span className={styles.sub} style={{ color: subreddit.color }}>
@@ -434,8 +453,14 @@ export function WorkerModal({ worker, subreddit, now, onClose }: Props) {
               <div className={styles.headBottom}>
                 <span className={styles.author}>{worker.author}</span>
                 {worker.trending && <span className={styles.trendTag}>trending</span>}
-                <span className={styles.metaDim}>· {worker.momentum.toFixed(2)}× momentum</span>
               </div>
+            </div>
+            {/* Pinned to the top-right of the post area, clear of the author line. */}
+            <div className={styles.momentumSlot}>
+              <MomentumTag
+                momentum={worker.momentum}
+                subredditName={subreddit.displayName}
+              />
             </div>
           </header>
 

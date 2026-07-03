@@ -1,10 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { motion, useMotionValueEvent, useTime, useTransform } from "framer-motion";
+import {
+  motion,
+  useMotionValueEvent,
+  useTime,
+  useTransform,
+  type MotionValue,
+} from "framer-motion";
 import type { AmenityPlacement, Layout } from "@/lib/domain/types";
 import { appearanceFor } from "@/lib/worker/appearance";
-import { hashString } from "@/lib/util/rng";
+import { hashString, mulberry32 } from "@/lib/util/rng";
 import { decorWalkers } from "@/lib/office/decor";
 import { Head, PersonSprite } from "./WorkerSprite";
 
@@ -156,6 +162,60 @@ function Walker({
   );
 }
 
+const MEETING_LOOP = 13; // seconds per conversation cycle
+// Talk windows across the loop (fractions): mostly one speaker at a time. Slot 0
+// is the presenter running the screen; 1-3 are the chatting attendees.
+const TALK_WINDOWS: ReadonlyArray<readonly [number, number]> = [
+  [0.03, 0.22],
+  [0.28, 0.46],
+  [0.52, 0.7],
+  [0.76, 0.95],
+];
+// Chair offsets from the table center. Workers sit ON these, facing the table.
+const CHAIRS: ReadonlyArray<readonly [number, number]> = [
+  [-66, 0], [66, 0], [-38, -28], [38, -28], [-52, 30], [0, 32], [52, 30],
+];
+
+/**
+ * Seeded, per-room attendance so no two meetings look the same: a random subset
+ * of the chairs is occupied (at least 3), some rooms have a presenter, and the
+ * chatting attendees are chosen from the occupied chairs.
+ */
+function attendance(seed: string): {
+  occupied: Set<number>;
+  chatters: number[];
+  hasPresenter: boolean;
+} {
+  const rng = mulberry32(hashString(`${seed}-att`));
+  const idx = CHAIRS.map((_, i) => i);
+  for (let i = idx.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [idx[i], idx[j]] = [idx[j], idx[i]];
+  }
+  const count = 3 + Math.floor(rng() * (CHAIRS.length - 2)); // 3..7
+  const occupied = idx.slice(0, count);
+  const hasPresenter = rng() < 0.6;
+  // Up to three of the occupied chairs chat (matched to TALK_WINDOWS[1..3]).
+  const chatters = occupied.slice(0, 3);
+  return { occupied: new Set(occupied), chatters, hasPresenter };
+}
+
+/** Opacity ramp for a talk window: fade in, hold, fade out over [a, b]. */
+function winOpacity(f: number, a: number, b: number): number {
+  if (f < a || f > b) return 0;
+  const fade = (b - a) * 0.18;
+  if (f < a + fade) return (f - a) / fade;
+  if (f > b - fade) return (b - f) / fade;
+  return 1;
+}
+
+/**
+ * A glass-walled meeting room: workers seated in the chairs around a conference
+ * table, a presenter at the head running an animated wall screen, and small chat
+ * bubbles that pop over attendees in turn (one shared per-room clock, phase-
+ * offset per room so they aren't all in sync). Furniture and empty chairs always
+ * render; the people, bubbles and live screen are gated by `ambient`.
+ */
 function GlassRoom({
   x,
   y,
@@ -171,19 +231,18 @@ function GlassRoom({
   ambient: boolean;
   seed: string;
 }) {
+  const clock = useTime();
+  const phase = (hashString(seed) % (MEETING_LOOP * 1000)) / 1000;
+  const att = useMemo(() => attendance(seed), [seed]);
   const cx = x + w / 2;
-  const cy = y + h / 2 + 10;
+  const cy = y + h / 2 + 6;
   const mullions: number[] = [];
   for (let mx = x + 60; mx < x + w - 20; mx += 60) mullions.push(mx);
-  const chairs: Array<[number, number]> = [
-    [-64, -4], [-32, -20], [0, -22], [32, -20], [64, -4], [-32, 22], [0, 24], [32, 22],
-  ];
   const laptops: Array<[number, number]> = [
     [-34, -6], [34, -6], [-34, 8], [34, 8],
   ];
-  const seats: Array<[number, number]> = [
-    [-46, -24], [46, -24], [-46, 26], [46, 26],
-  ];
+  const tvTargetY = y + 22; // where the presenter's laser lands on the screen
+
   return (
     <g>
       <rect x={x} y={y} width={w} height={h} fill="var(--floor-1)" />
@@ -197,24 +256,242 @@ function GlassRoom({
       ))}
       {/* door gap */}
       <rect x={cx - 16} y={y + h - 4} width={32} height={4} fill="var(--floor-1)" />
-      {/* wall-mounted screen */}
-      <rect x={cx - 26} y={y + 6} width={52} height={14} rx={2} fill="#14161c" />
-      <rect x={cx - 23} y={y + 9} width={46} height={8} fill="#2b6cb0" opacity={0.7} />
-      {/* conference table + chairs */}
+
+      <MeetingTV cx={cx} top={y} ambient={ambient} />
+
+      {/* conference table */}
       <rect x={cx - 52} y={cy - 17} width={104} height={34} rx={15} fill="var(--desk)" />
       <rect x={cx - 52} y={cy - 17} width={104} height={5} fill="var(--desk-hi)" />
-      {chairs.map(([dx, dy], i) => (
-        <circle key={i} cx={cx + dx} cy={cy + dy} r={8} fill="var(--chair)" />
-      ))}
       {laptops.map(([dx, dy], i) => (
         <Laptop key={i} x={cx + dx} y={cy + dy} />
       ))}
+
+      {/* chairs (always); a seeded subset seats a worker when the office is live */}
+      {CHAIRS.map(([dx, dy], i) => {
+        const len = Math.hypot(dx, dy) || 1;
+        return (
+          <SeatedWorker
+            key={i}
+            px={cx + dx}
+            py={cy + dy}
+            ix={-dx / len}
+            iy={-dy / len}
+            seed={`${seed}-s${i}`}
+            occupied={ambient && att.occupied.has(i)}
+          />
+        );
+      })}
+
       <Plant x={x + w - 16} y={y + 20} s={0.66} />
-      {ambient &&
-        seats.map(([dx, dy], i) => (
-          <Idler key={i} x={cx + dx} y={cy + dy} seed={`${seed}-gm${i}`} />
-        ))}
+
+      {ambient && (
+        <>
+          {att.hasPresenter && (
+            <Presenter
+              px={cx}
+              py={cy - 42}
+              clock={clock}
+              phase={phase}
+              seed={`${seed}-pres`}
+              tvX={cx}
+              tvY={tvTargetY}
+            />
+          )}
+          {att.chatters.map((ci, k) => {
+            const [dx, dy] = CHAIRS[ci];
+            return (
+              <ChatBubble
+                key={ci}
+                px={cx + dx}
+                py={cy + dy - 17}
+                clock={clock}
+                phase={phase}
+                window={TALK_WINDOWS[k + 1]}
+              />
+            );
+          })}
+        </>
+      )}
     </g>
+  );
+}
+
+/** A wall-mounted presentation screen: bezel, a slide (title + bullets), a small
+    animated bar chart, and a blinking "live" dot when the office is active. */
+function MeetingTV({ cx, top, ambient }: { cx: number; top: number; ambient: boolean }) {
+  const bx = cx - 36;
+  const by = top + 8;
+  const sx = bx + 4;
+  const sy = by + 4;
+  const barBase = sy + 16;
+  const bars = [9, 6, 11]; // resting heights
+  return (
+    <g>
+      {/* wall mount */}
+      <rect x={cx - 1.5} y={top + 3} width={3} height={6} fill="var(--glass-frame)" />
+      {/* bezel */}
+      <rect x={bx} y={by} width={72} height={26} rx={3} fill="#0f1116" />
+      <rect x={bx + 1} y={by + 1} width={70} height={24} rx={2.5} fill="#191c23" />
+      {/* slide */}
+      <rect x={sx} y={sy} width={64} height={18} rx={1.5} fill="#e9f0f7" />
+      <rect x={sx} y={sy} width={64} height={5} rx={1.5} fill="#3b82c4" />
+      <rect x={sx + 3} y={sy + 8} width={26} height={2} rx={1} fill="#9fb0c0" />
+      <rect x={sx + 3} y={sy + 12} width={20} height={2} rx={1} fill="#9fb0c0" />
+      {/* mini bar chart */}
+      {bars.map((hStatic, i) => {
+        const bxi = sx + 40 + i * 7;
+        if (!ambient) {
+          return (
+            <rect key={i} x={bxi} y={barBase - hStatic} width={4} height={hStatic} rx={0.5} fill="#3b82c4" />
+          );
+        }
+        const hi = [9, 11, 7][i];
+        const lo = 3;
+        return (
+          <motion.rect
+            key={i}
+            x={bxi}
+            width={4}
+            rx={0.5}
+            fill="#3b82c4"
+            initial={{ height: lo, y: barBase - lo }}
+            animate={{
+              height: [lo, hi, lo + 2, hi],
+              y: [barBase - lo, barBase - hi, barBase - lo - 2, barBase - hi],
+            }}
+            transition={{ duration: 4.5, repeat: Infinity, delay: i * 0.35, ease: "easeInOut" }}
+          />
+        );
+      })}
+      {ambient && (
+        <motion.circle
+          cx={sx + 60}
+          cy={sy + 2.5}
+          r={1.4}
+          fill="#ff5a5a"
+          animate={{ opacity: [1, 0.25, 1] }}
+          transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
+        />
+      )}
+    </g>
+  );
+}
+
+/**
+ * A chair (always drawn) with a worker seated on it when `occupied`. The backrest
+ * nub sits on the outward side and the worker is nudged toward the table (via the
+ * inward unit vector ix/iy) so they read as sitting and facing the meeting.
+ */
+function SeatedWorker({
+  px,
+  py,
+  ix,
+  iy,
+  seed,
+  occupied,
+}: {
+  px: number;
+  py: number;
+  ix: number;
+  iy: number;
+  seed: string;
+  occupied: boolean;
+}) {
+  const delay = (hashString(seed) % 24) / 10;
+  return (
+    <g transform={`translate(${px},${py})`}>
+      {/* backrest nub (outward) + seat */}
+      <circle cx={-ix * 7} cy={-iy * 7} r={4} fill="rgba(0,0,0,0.22)" />
+      <circle cx={0} cy={0} r={9} fill="var(--chair)" />
+      {occupied && (
+        <g transform={`translate(${ix * 2},${iy * 2}) scale(0.82)`}>
+          <motion.g
+            animate={{ y: [0, -1.2, 0] }}
+            transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", delay }}
+          >
+            <PersonSprite appearance={appearanceFor(seed)} color={neut(seed)} />
+          </motion.g>
+        </g>
+      )}
+    </g>
+  );
+}
+
+/** The presenter standing at the head of the table; during their talk window a
+    laser points from them to the screen. */
+function Presenter({
+  px,
+  py,
+  clock,
+  phase,
+  seed,
+  tvX,
+  tvY,
+}: {
+  px: number;
+  py: number;
+  clock: MotionValue<number>;
+  phase: number;
+  seed: string;
+  tvX: number;
+  tvY: number;
+}) {
+  const [w0, w1] = TALK_WINDOWS[0];
+  const active = useTransform(clock, (t) =>
+    winOpacity(((t / 1000 + phase) % MEETING_LOOP) / MEETING_LOOP, w0, w1),
+  );
+  return (
+    <>
+      <motion.g style={{ opacity: active }}>
+        <line x1={px} y1={py - 4} x2={tvX} y2={tvY} stroke="#ff5a5a" strokeWidth={0.8} opacity={0.5} />
+        <circle cx={tvX} cy={tvY} r={2} fill="#ff5a5a" />
+      </motion.g>
+      <g transform={`translate(${px},${py})`}>
+        <motion.g
+          animate={{ y: [0, -1.5, 0] }}
+          transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+        >
+          <PersonSprite appearance={appearanceFor(seed)} color={neut(seed)} />
+        </motion.g>
+      </g>
+    </>
+  );
+}
+
+/** A small speech bubble that fades in over its attendee during their talk
+    window, with a typing-dot animation inside. */
+function ChatBubble({
+  px,
+  py,
+  clock,
+  phase,
+  window,
+}: {
+  px: number;
+  py: number;
+  clock: MotionValue<number>;
+  phase: number;
+  window: readonly [number, number];
+}) {
+  const o = useTransform(clock, (t) =>
+    winOpacity(((t / 1000 + phase) % MEETING_LOOP) / MEETING_LOOP, window[0], window[1]),
+  );
+  return (
+    <motion.g style={{ opacity: o }} transform={`translate(${px},${py})`}>
+      <path d="M-3,7 L0,12 L3,7 Z" fill="#f4f7fb" />
+      <rect x={-12} y={-6} width={24} height={14} rx={5} fill="#f4f7fb" stroke="#cdd6e0" strokeWidth={0.8} />
+      {[-5, 0, 5].map((dx, i) => (
+        <motion.circle
+          key={i}
+          cx={dx}
+          cy={1}
+          r={1.5}
+          fill="#5b6675"
+          animate={{ opacity: [0.3, 1, 0.3] }}
+          transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.2, ease: "easeInOut" }}
+        />
+      ))}
+    </motion.g>
   );
 }
 
