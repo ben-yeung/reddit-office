@@ -23,7 +23,7 @@ export function Decor({ layout, ambient }: { layout: Layout; ambient: boolean })
   return (
     <g className="pixelated">
       {layout.amenities.map((am, i) => (
-        <Amenity key={i} placement={am} ambient={ambient} />
+        <Amenity key={i} placement={am} ambient={ambient} seed={`${layout.seed}:${i}`} />
       ))}
       {walkers.map((w) => (
         <Walker key={w.seed} x0={w.x0} y0={w.y0} x1={w.x1} y1={w.y1} dur={w.dur} seed={w.seed} />
@@ -32,19 +32,29 @@ export function Decor({ layout, ambient }: { layout: Layout; ambient: boolean })
   );
 }
 
-function Amenity({ placement, ambient }: { placement: AmenityPlacement; ambient: boolean }) {
+function Amenity({
+  placement,
+  ambient,
+  seed,
+}: {
+  placement: AmenityPlacement;
+  ambient: boolean;
+  seed: string;
+}) {
   const { kind, position, size } = placement;
   const cx = position.x + size.w / 2;
   const cy = position.y + size.h / 2;
   switch (kind) {
     case "meeting":
-      return <GlassRoom x={position.x} y={position.y} w={size.w} h={size.h} ambient={ambient} />;
+      return (
+        <GlassRoom x={position.x} y={position.y} w={size.w} h={size.h} ambient={ambient} seed={seed} />
+      );
     case "pingpong":
-      return <PingPong cx={cx} cy={cy} ambient={ambient} />;
+      return <PingPong cx={cx} cy={cy} ambient={ambient} seed={seed} />;
     case "lounge":
-      return <Lounge cx={cx} cy={cy} ambient={ambient} />;
+      return <Lounge cx={cx} cy={cy} ambient={ambient} seed={seed} />;
     case "coffee":
-      return <CoffeeBar x={position.x} y={position.y + 46} w={size.w} ambient={ambient} />;
+      return <CoffeeBar x={position.x} y={position.y + 46} w={size.w} ambient={ambient} seed={seed} />;
   }
 }
 
@@ -152,12 +162,14 @@ function GlassRoom({
   w,
   h,
   ambient,
+  seed,
 }: {
   x: number;
   y: number;
   w: number;
   h: number;
   ambient: boolean;
+  seed: string;
 }) {
   const cx = x + w / 2;
   const cy = y + h / 2 + 10;
@@ -199,12 +211,24 @@ function GlassRoom({
       ))}
       <Plant x={x + w - 16} y={y + 20} s={0.66} />
       {ambient &&
-        seats.map(([dx, dy], i) => <Idler key={i} x={cx + dx} y={cy + dy} seed={`gm${i}`} />)}
+        seats.map(([dx, dy], i) => (
+          <Idler key={i} x={cx + dx} y={cy + dy} seed={`${seed}-gm${i}`} />
+        ))}
     </g>
   );
 }
 
-function PingPong({ cx, cy, ambient }: { cx: number; cy: number; ambient: boolean }) {
+function PingPong({
+  cx,
+  cy,
+  ambient,
+  seed,
+}: {
+  cx: number;
+  cy: number;
+  ambient: boolean;
+  seed: string;
+}) {
   return (
     <g>
       <rect x={cx - 66} y={cy - 34} width={132} height={68} rx={6} fill="#2f8f4f" stroke="#eef1f6" strokeWidth={2} />
@@ -212,8 +236,8 @@ function PingPong({ cx, cy, ambient }: { cx: number; cy: number; ambient: boolea
       <line x1={cx} y1={cy - 36} x2={cx} y2={cy + 36} stroke="#eef1f6" strokeWidth={2} />
       {ambient && (
         <>
-          <Player x={cx - 84} y={cy} up seed="pp1" paddleDx={18} paddleRot={-30} paddleColor="#d23a3a" />
-          <Player x={cx + 84} y={cy} up={false} seed="pp2" paddleDx={-18} paddleRot={30} paddleColor="#2b5fa8" />
+          <Player x={cx - 84} y={cy} up seed={`${seed}-pp1`} paddleDx={18} paddleRot={-30} paddleColor="#d23a3a" />
+          <Player x={cx + 84} y={cy} up={false} seed={`${seed}-pp2`} paddleDx={-18} paddleRot={30} paddleColor="#2b5fa8" />
           <motion.circle
             r={3}
             fill="#fff"
@@ -274,7 +298,17 @@ function Player({
   );
 }
 
-function Lounge({ cx, cy, ambient }: { cx: number; cy: number; ambient: boolean }) {
+function Lounge({
+  cx,
+  cy,
+  ambient,
+  seed,
+}: {
+  cx: number;
+  cy: number;
+  ambient: boolean;
+  seed: string;
+}) {
   return (
     <g>
       <ellipse cx={cx} cy={cy} rx={92} ry={56} fill="var(--rug)" opacity={0.7} />
@@ -284,12 +318,24 @@ function Lounge({ cx, cy, ambient }: { cx: number; cy: number; ambient: boolean 
       <ellipse cx={cx + 6} cy={cy + 20} rx={28} ry={15} fill="var(--desk)" />
       <ellipse cx={cx + 6} cy={cy + 16} rx={28} ry={12} fill="var(--desk-hi)" />
       <Plant x={cx + 62} y={cy + 18} s={0.74} />
-      {ambient && <Idler x={cx - 16} y={cy - 24} seed="lounge1" />}
+      {ambient && <Idler x={cx - 16} y={cy - 24} seed={`${seed}-lounge`} />}
     </g>
   );
 }
 
-function CoffeeBar({ x, y, w, ambient }: { x: number; y: number; w: number; ambient: boolean }) {
+function CoffeeBar({
+  x,
+  y,
+  w,
+  ambient,
+  seed,
+}: {
+  x: number;
+  y: number;
+  w: number;
+  ambient: boolean;
+  seed: string;
+}) {
   return (
     <g>
       <rect x={x} y={y} width={w} height={24} rx={4} fill="var(--desk)" />
@@ -302,7 +348,7 @@ function CoffeeBar({ x, y, w, ambient }: { x: number; y: number; w: number; ambi
       {[0, 1, 2, 3].map((i) => (
         <circle key={i} cx={x + 34 + i * 44} cy={y + 40} r={9} fill="var(--chair)" />
       ))}
-      {ambient && <Idler x={x + 40} y={y - 16} seed="coffee1" />}
+      {ambient && <Idler x={x + 40} y={y - 16} seed={`${seed}-coffee`} />}
     </g>
   );
 }
