@@ -10,7 +10,7 @@ import { CUBICLE_W, CUBICLE_H, SEAT_COLS, SEAT_ROWS } from "@/lib/domain/constan
 import { mulberry32, type Rng } from "@/lib/util/rng";
 
 /** Bump when the layout scheme changes so stale persisted layouts regenerate. */
-export const LAYOUT_VERSION = 4;
+export const LAYOUT_VERSION = 11;
 export const GAP_X = 90;
 export const GAP_Y = 90;
 /** Grid cell pitch (a cubicle footprint plus its gap). */
@@ -27,13 +27,16 @@ interface AmenitySpec {
   h: number;
 }
 
-/** Amenities distributed around the cubicle grid (multiple meeting rooms). */
-const AMENITIES: AmenitySpec[] = [
-  { kind: "meeting", w: 240, h: 152 },
-  { kind: "meeting", w: 216, h: 140 },
-  { kind: "meeting", w: 228, h: 148 },
-  { kind: "pingpong", w: 152, h: 96 },
+/** Uniform meeting-room footprint (used for every meeting room on the floor). */
+const MEETING: AmenitySpec = { kind: "meeting", w: 228, h: 148 };
+
+/**
+ * The three social structures that line the top of the floor, left to right.
+ * Different footprints; they hang off the top edge bottom-aligned.
+ */
+const TOP_STRUCTURES: AmenitySpec[] = [
   { kind: "lounge", w: 196, h: 128 },
+  { kind: "pingpong", w: 152, h: 96 },
   { kind: "coffee", w: 200, h: 96 },
 ];
 
@@ -51,12 +54,25 @@ export function gridCols(count: number): number {
   return Math.ceil(Math.sqrt(count));
 }
 
+/** World-space x-center of each interior aisle (vertical hallway) between columns. */
+function colGapCenters(cols: number): number[] {
+  return Array.from({ length: Math.max(cols - 1, 0) }, (_, c) => c * CELL_W + CUBICLE_W + GAP_X / 2);
+}
+
+/** World-space y-center of each interior aisle (horizontal hallway) between rows. */
+function rowGapCenters(rows: number): number[] {
+  return Array.from({ length: Math.max(rows - 1, 0) }, (_, r) => r * CELL_H + CUBICLE_H + GAP_Y / 2);
+}
+
 /**
- * Generate a grid-aligned office floor: subreddit cubicles on a square grid
- * (3x3 for the default 9), with amenities distributed around the perimeter on
- * each side - a real floor plan rather than one clump. The seed shuffles both the
- * subreddit order and which amenity sits on which side (a preview of
- * drag-to-reorder; ADR-0007). Persisted, so it runs once per office unless reset.
+ * Generate a grid-aligned office floor: subreddit cubicles on a roughly-square
+ * grid (4x3 for the default 12), wrapped by a fixed ring of amenities aligned to
+ * the grid's hallways - a real floor plan rather than one clump. The top edge
+ * carries the three social structures (lounge, ping-pong, coffee), each on a
+ * vertical hallway; the other three sides are lined with meeting rooms (2 left,
+ * 2 right, 3 along the bottom), on the hallways too. The seed still shuffles the
+ * subreddit order (a preview of drag-to-reorder; ADR-0007). Persisted, so it
+ * runs once per office unless reset.
  */
 export function generateLayout(subreddits: Subreddit[], seed: number): Layout {
   const rng = mulberry32(seed);
@@ -70,35 +86,40 @@ export function generateLayout(subreddits: Subreddit[], seed: number): Layout {
     size: { w: CUBICLE_W, h: CUBICLE_H },
   }));
 
-  // Cubicle-grid footprint, used to anchor amenities on each side.
+  // Cubicle-grid footprint, used to anchor the amenity ring on each side.
   const gW = (cols - 1) * CELL_W + CUBICLE_W;
   const gH = (rows - 1) * CELL_H + CUBICLE_H;
-  const cx = gW / 2;
-  const cy = gH / 2;
-  const M = GAP_X; // perimeter margin between grid and amenities
+  const M = GAP_X; // margin between the grid and the surrounding amenities
 
-  // perimeter anchors: four sides + four corners, so amenities spread out.
-  // ax/ay: -1 = before the grid, 0 = centered on it, 1 = after it.
-  const anchors: Array<{ ax: number; ay: number }> = [
-    { ax: 1, ay: 0 }, // right
-    { ax: 0, ay: 1 }, // bottom
-    { ax: -1, ay: 0 }, // left
-    { ax: 0, ay: -1 }, // top
-    { ax: 1, ay: -1 }, // top-right
-    { ax: 1, ay: 1 }, // bottom-right
-    { ax: -1, ay: 1 }, // bottom-left
-    { ax: -1, ay: -1 }, // top-left
-  ];
-  const place = (a: AmenitySpec, an: { ax: number; ay: number }): Vec2 => ({
-    x: an.ax === 1 ? gW + M : an.ax === -1 ? -M - a.w : cx - a.w / 2,
-    y: an.ay === 1 ? gH + M : an.ay === -1 ? -M - a.h : cy - a.h / 2,
+  const amenities: AmenityPlacement[] = [];
+  const add = (spec: AmenitySpec, x: number, y: number) =>
+    amenities.push({ kind: spec.kind, position: { x, y }, size: { w: spec.w, h: spec.h } });
+
+  // Anchor the amenity ring to the grid's hallways (the aisles between cubicles):
+  // top/bottom line up with the vertical hallways, left/right with the horizontal
+  // ones. For the default 4x3 grid that's 3 vertical + 2 horizontal aisles.
+  const cxAisle = colGapCenters(cols); // 4 columns -> 3 vertical hallways
+  const cyAisle = rowGapCenters(rows); // 3 rows -> 2 horizontal hallways
+
+  // Top: one structure centered on each vertical hallway, above the grid. All
+  // three share a vertical center line (rather than a common bottom) so the
+  // taller lounge sits level with the ping-pong table and coffee bar instead of
+  // riding higher.
+  const topMinH = Math.min(...TOP_STRUCTURES.map((s) => s.h));
+  const topCenterY = -M - topMinH / 2;
+  TOP_STRUCTURES.forEach((s, i) => {
+    const cx = cxAisle[Math.min(i, cxAisle.length - 1)];
+    add(s, cx - s.w / 2, topCenterY - s.h / 2);
   });
-  const placed = shuffled(anchors, rng);
-  const amenities: AmenityPlacement[] = shuffled(AMENITIES, rng).map((spec, i) => ({
-    kind: spec.kind,
-    position: place(spec, placed[i % placed.length]),
-    size: { w: spec.w, h: spec.h },
-  }));
+  // Bottom: one meeting room centered on each vertical hallway, below the grid.
+  cxAisle.forEach((cx) => {
+    add(MEETING, cx - MEETING.w / 2, gH + M);
+  });
+  // Left / right: one meeting room centered on each horizontal hallway.
+  cyAisle.forEach((cy) => {
+    add(MEETING, -M - MEETING.w, cy - MEETING.h / 2); // left
+    add(MEETING, gW + M, cy - MEETING.h / 2); // right
+  });
 
   return { version: LAYOUT_VERSION, seed, cubicles, amenities };
 }
