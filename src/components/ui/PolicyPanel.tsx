@@ -1,12 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type {
-  OfficePolicy,
-  OfficeTheme,
-  SourcingRule,
-  WorkerEventType,
-} from "@/lib/domain/types";
+import type { OfficePolicy, OfficeTheme, SourcingRule, WorkerEventType } from "@/lib/domain/types";
 import styles from "./controls.module.css";
 
 interface Props {
@@ -46,6 +41,10 @@ export function PolicyPanel({ policy, onChange, onReset }: Props) {
 
   function setAmbient(ambient: boolean) {
     onChange({ ...policy, ambient });
+  }
+
+  function setPauseOnModal(pauseOnModal: boolean) {
+    onChange({ ...policy, pauseOnModal });
   }
 
   return (
@@ -124,6 +123,24 @@ export function PolicyPanel({ policy, onChange, onReset }: Props) {
               <button
                 className={`${styles.segment} ${!policy.ambient ? styles.segmentOn : ""}`}
                 onClick={() => setAmbient(false)}
+              >
+                Off
+              </button>
+            </div>
+          </div>
+
+          <div className={styles.group}>
+            <div className={styles.groupLabel}>Pause office on open</div>
+            <div className={styles.segmented}>
+              <button
+                className={`${styles.segment} ${policy.pauseOnModal ? styles.segmentOn : ""}`}
+                onClick={() => setPauseOnModal(true)}
+              >
+                On
+              </button>
+              <button
+                className={`${styles.segment} ${!policy.pauseOnModal ? styles.segmentOn : ""}`}
+                onClick={() => setPauseOnModal(false)}
               >
                 Off
               </button>

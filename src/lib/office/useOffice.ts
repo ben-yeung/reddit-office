@@ -55,8 +55,16 @@ export interface OfficeApi {
  * Owns the office data lifecycle: resolves the persisted layout/policy, runs the
  * (mock) DataSource, and surfaces snapshots + per-worker event pulses to React.
  * The DataSource is created only on the client (timers, Date.now, localStorage).
+ *
+ * When a modal is open AND the `pauseOnModal` policy is on, this freezes what
+ * reaches React: the newest snapshot is held and applied on resume, and transient
+ * event pulses are dropped. The source keeps ticking underneath, so there's no
+ * clock jump / surge burst on resume - the office simply catches up to its latest
+ * state. This keeps the background perfectly still behind a modal's blurred
+ * backdrop, so the modal's own animation stays smooth even without GPU compositing.
+ * `pauseOnModal` is off by default, so normally data flows through uninterrupted.
  */
-export function useOffice(): OfficeApi {
+export function useOffice(modalOpen: boolean): OfficeApi {
   const [layout, setLayout] = useState<Layout>(() =>
     generateLayout(CURATED_SUBREDDITS, DEFAULT_SEED),
   );
@@ -66,16 +74,29 @@ export function useOffice(): OfficeApi {
 
   const sourceRef = useRef<RedditDemoDataSource | null>(null);
   const seqRef = useRef(0);
+  // While paused, the newest snapshot is parked here and flushed on resume.
+  const pausedRef = useRef(false);
+  const pendingSnapshotRef = useRef<WorkersByCubicle | null>(null);
 
   const startSource = useCallback((l: Layout, p: OfficePolicy) => {
     sourceRef.current?.stop();
     setWorkersByCubicle({});
     setPulses({});
+    pendingSnapshotRef.current = null;
     const src = new RedditDemoDataSource(CURATED_SUBREDDITS, l, p);
     sourceRef.current = src;
     src.start({
-      onSnapshot: (s) => setWorkersByCubicle(s.workersByCubicle),
+      onSnapshot: (s) => {
+        // Paused (modal open): hold only the latest; applied when we resume.
+        if (pausedRef.current) {
+          pendingSnapshotRef.current = s.workersByCubicle;
+          return;
+        }
+        setWorkersByCubicle(s.workersByCubicle);
+      },
       onEvent: (e) => {
+        // Pulses are one-shot cosmetics; drop any that fire behind a modal.
+        if (pausedRef.current) return;
         seqRef.current += 1;
         const seq = seqRef.current;
         // Pulses are transient, one-shot triggers keyed by worker. Retain only
@@ -134,6 +155,18 @@ export function useOffice(): OfficeApi {
     // Intentionally run once; startSource is stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Freeze data delivery only when a modal is open and the policy opts in. Track
+  // the flag for the source callbacks, and on resume apply whatever snapshot
+  // arrived while paused so the office catches up in one step.
+  const paused = modalOpen && policy.pauseOnModal;
+  useEffect(() => {
+    pausedRef.current = paused;
+    if (!paused && pendingSnapshotRef.current) {
+      setWorkersByCubicle(pendingSnapshotRef.current);
+      pendingSnapshotRef.current = null;
+    }
+  }, [paused]);
 
   const setPolicy = useCallback(
     (next: OfficePolicy) => {

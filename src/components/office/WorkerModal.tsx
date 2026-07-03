@@ -8,6 +8,8 @@ import remarkGfm from "remark-gfm";
 import type { Subreddit, Worker } from "@/lib/domain/types";
 import type { DemoCommentsPayload } from "@/lib/reddit/dto";
 import { useDialog } from "@/lib/util/useDialog";
+import { ModalScrim } from "@/components/ui/ModalScrim";
+import { usePauseBackgroundMotion } from "./BackgroundMotion";
 import { VideoPlayer } from "./VideoPlayer";
 import styles from "./WorkerModal.module.css";
 
@@ -315,19 +317,12 @@ function LinkConfirm({
   }, [onCancel]);
 
   return createPortal(
-    <motion.div
-      className={styles.confirmBackdrop}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      onClick={onCancel}
-    >
+    <ModalScrim onClose={onCancel} tint="rgba(6, 7, 10, 0.72)" blur="3px" padding="5vh 5vw" zIndex={60}>
       <div
         className={styles.confirmPanel}
         role="dialog"
         aria-modal="true"
         aria-label="Open external link"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className={styles.confirmTitle}>Open this link?</div>
         <p className={styles.confirmSub}>This will open an external site in a new tab.</p>
@@ -342,7 +337,7 @@ function LinkConfirm({
           </button>
         </div>
       </div>
-    </motion.div>,
+    </ModalScrim>,
     document.body,
   );
 }
@@ -357,6 +352,8 @@ function LinkConfirm({
 export function WorkerModal({ worker, subreddit, now, onClose }: Props) {
   const ageMin = Math.max(0, Math.round((now - worker.createdAt) / 60000));
   const dialogRef = useDialog<HTMLDivElement>(onClose);
+  // Freeze the office behind the blurred backdrop for the modal's whole life.
+  usePauseBackgroundMotion();
   const [imageOk, setImageOk] = useState(true);
   const [comments, setComments] = useState<CommentsState>({ status: "loading" });
   // An embedded link awaiting confirmation before opening in a new tab.
@@ -400,13 +397,7 @@ export function WorkerModal({ worker, subreddit, now, onClose }: Props) {
 
   return createPortal(
     <>
-    <motion.div
-      className={styles.backdrop}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      onClick={onClose}
-    >
+    <ModalScrim onClose={onClose} tint="rgba(6, 7, 10, 0.66)" blur="3px" padding="4vh 4vw" zIndex={50}>
       <motion.div
         ref={dialogRef}
         tabIndex={-1}
@@ -416,9 +407,10 @@ export function WorkerModal({ worker, subreddit, now, onClose }: Props) {
         aria-label={worker.title}
         initial={{ opacity: 0, y: 24, scale: 0.97 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 24, scale: 0.97 }}
+        // Snappy tween exit: a spring's long settling tail keeps the whole
+        // modal (and its blur) mounted well after it looks gone.
+        exit={{ opacity: 0, y: 24, scale: 0.97, transition: { duration: 0.15, ease: "easeIn" } }}
         transition={{ type: "spring", stiffness: 300, damping: 26 }}
-        onClick={(e) => e.stopPropagation()}
       >
         <button className={styles.close} onClick={onClose} aria-label="Close">
           <CloseIcon />
@@ -617,7 +609,7 @@ export function WorkerModal({ worker, subreddit, now, onClose }: Props) {
           </div>
         </aside>
       </motion.div>
-    </motion.div>
+    </ModalScrim>
     {pendingUrl && (
       <LinkConfirm
         url={pendingUrl}

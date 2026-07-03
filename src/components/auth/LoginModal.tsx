@@ -4,6 +4,8 @@ import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { useDialog } from "@/lib/util/useDialog";
+import { ModalScrim } from "@/components/ui/ModalScrim";
+import { usePauseBackgroundMotion } from "@/components/office/BackgroundMotion";
 import { RedditGlyph } from "./RedditGlyph";
 import styles from "./auth.module.css";
 
@@ -19,19 +21,13 @@ interface Props {
 export function LoginModal({ onClose }: Props) {
   const { login, error, authConfigured } = useAuth();
   const dialogRef = useDialog<HTMLDivElement>(onClose);
+  // Freeze the office behind the blurred backdrop for the modal's whole life.
+  usePauseBackgroundMotion();
 
   if (typeof document === "undefined") return null;
 
   return createPortal(
-    <motion.div
-      className={styles.overlay}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
+    <ModalScrim onClose={onClose} tint="rgba(6, 7, 11, 0.62)" blur="4px" padding="20px" zIndex={50}>
       <motion.div
         ref={dialogRef}
         tabIndex={-1}
@@ -41,7 +37,9 @@ export function LoginModal({ onClose }: Props) {
         aria-label="Log in to Reddit Office"
         initial={{ opacity: 0, y: 12, scale: 0.96 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 8, scale: 0.97 }}
+        // Snappy tween exit: a spring's long settling tail keeps the whole modal
+        // (and its blur) mounted well after it looks gone.
+        exit={{ opacity: 0, y: 8, scale: 0.97, transition: { duration: 0.14, ease: "easeIn" } }}
         transition={{ type: "spring", stiffness: 320, damping: 26 }}
       >
         <button className={styles.close} onClick={onClose} aria-label="Close">
@@ -50,8 +48,7 @@ export function LoginModal({ onClose }: Props) {
 
         <p className={`pixel-font ${styles.title}`}>REDDIT OFFICE</p>
         <p className={styles.subtitle}>
-          Log in with Reddit to build an office from your own subscriptions, updating in real
-          time.
+          Log in with Reddit to build an office from your own subscriptions, updating in real time.
         </p>
 
         <button
@@ -78,7 +75,7 @@ export function LoginModal({ onClose }: Props) {
           </p>
         )}
       </motion.div>
-    </motion.div>,
+    </ModalScrim>,
     document.body,
   );
 }
