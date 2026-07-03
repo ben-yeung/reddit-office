@@ -20,6 +20,17 @@ import type {
 
 const DEFAULT_SEED = 20240702;
 
+/**
+ * True when a persisted layout's cubicles cover exactly the current subreddit
+ * set (one cubicle per subreddit, no stale or missing ids). A mismatch means the
+ * curated list changed since the layout was saved, so it must be regenerated.
+ */
+export function layoutMatchesSubreddits(layout: Layout, subreddits: Subreddit[]): boolean {
+  if (layout.cubicles.length !== subreddits.length) return false;
+  const ids = new Set(subreddits.map((s) => s.id));
+  return layout.cubicles.every((c) => ids.has(c.subredditId));
+}
+
 /** Keep only pulses from roughly the last N events (older ones have long since
     fired their one-shot animation) so the pulse map stays bounded. */
 const PULSE_RETENTION = 256;
@@ -93,9 +104,18 @@ export function useOffice(): OfficeApi {
           events: { ...DEFAULT_POLICY.events, ...persisted.policy.events },
         }
       : null;
-    // Only reuse a persisted layout if it matches the current layout scheme.
+    // Only reuse a persisted layout if it matches both the current layout scheme
+    // *and* the current subreddit set. The latter matters because cubicles are
+    // keyed by subreddit id: if the curated list changed, a stale layout is
+    // missing cubicles for the new subs (and carries dead ones for removed subs),
+    // so it must be regenerated. Checking the id set here makes that self-healing
+    // - no manual version/storage-key bump needed on every subreddit change.
     const persistedLayout =
-      persisted?.layout && persisted.layout.version === LAYOUT_VERSION ? persisted.layout : null;
+      persisted?.layout &&
+      persisted.layout.version === LAYOUT_VERSION &&
+      layoutMatchesSubreddits(persisted.layout, CURATED_SUBREDDITS)
+        ? persisted.layout
+        : null;
     const finalLayout = persistedLayout ?? layout;
     const finalPolicy = persistedPolicy ?? policy;
     // One-time hydration of React state from localStorage. This must happen in
