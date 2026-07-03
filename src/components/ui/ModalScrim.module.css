@@ -1,0 +1,19 @@
+.root {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  cursor: default;
+}
+
+/*
+ * Blur and tint fill the viewport behind the card. They are pointer-transparent
+ * so backdrop clicks reach `.root` (which handles close), and clicks on the card
+ * do not. The blur layer deliberately has no opacity transition - see ModalScrim.
+ */
+.blur,
+.tint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}

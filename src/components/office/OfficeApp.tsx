@@ -9,6 +9,7 @@ import { officeExtent } from "@/lib/office/decor";
 import type { Worker } from "@/lib/domain/types";
 import { OfficeStage } from "./OfficeStage";
 import { WorkerModal } from "./WorkerModal";
+import { useBackgroundMotionPaused } from "./BackgroundMotion";
 import { Hud } from "@/components/ui/Hud";
 import { PolicyPanel } from "@/components/ui/PolicyPanel";
 import { AuthControl } from "@/components/auth/AuthControl";
@@ -24,7 +25,13 @@ interface Selection {
  * the overlays. Presentational SVG lives in OfficeStage; this owns interaction.
  */
 export function OfficeApp() {
-  const office = useOffice();
+  // With the `pauseOnModal` policy on, an open modal freezes the office - both
+  // the sprite motion (OfficeStage) and the data pipeline (useOffice) - so no
+  // motion churns the background behind the modal's blurred backdrop. Off by
+  // default, so normally the office keeps living while a modal is open.
+  const modalOpen = useBackgroundMotionPaused();
+  const office = useOffice(modalOpen);
+  const freezeBackground = modalOpen && office.policy.pauseOnModal;
   const containerRef = useRef<HTMLDivElement>(null);
   const size = useElementSize(containerRef);
   const { camera, panBy, zoomAt, fitTo } = useCamera();
@@ -103,6 +110,7 @@ export function OfficeApp() {
         camera={camera}
         viewport={size}
         ambient={office.policy.ambient}
+        paused={freezeBackground}
         onSelectWorker={onSelectWorker}
       />
 
@@ -116,7 +124,11 @@ export function OfficeApp() {
 
       <div className={styles.hint}>drag to pan · scroll to zoom · click a worker</div>
 
-      <PolicyPanel policy={office.policy} onChange={office.setPolicy} onReset={office.resetLayout} />
+      <PolicyPanel
+        policy={office.policy}
+        onChange={office.setPolicy}
+        onReset={office.resetLayout}
+      />
 
       <Hud
         onZoomIn={() => zoomAt(size.width / 2, size.height / 2, 1.25)}
