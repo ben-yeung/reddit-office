@@ -11,6 +11,7 @@ import { useDialog } from "@/lib/util/useDialog";
 import { ModalScrim } from "@/components/ui/ModalScrim";
 import { usePauseBackgroundMotion } from "./BackgroundMotion";
 import { VideoPlayer } from "./VideoPlayer";
+import { MomentumTag } from "./MomentumTag";
 import styles from "./WorkerModal.module.css";
 
 /**
@@ -452,8 +453,14 @@ export function WorkerModal({ worker, subreddit, now, onClose }: Props) {
               <div className={styles.headBottom}>
                 <span className={styles.author}>{worker.author}</span>
                 {worker.trending && <span className={styles.trendTag}>trending</span>}
-                <span className={styles.metaDim}>· {worker.momentum.toFixed(2)}× momentum</span>
               </div>
+            </div>
+            {/* Pinned to the top-right of the post area, clear of the author line. */}
+            <div className={styles.momentumSlot}>
+              <MomentumTag
+                momentum={worker.momentum}
+                subredditName={subreddit.displayName}
+              />
             </div>
           </header>
 

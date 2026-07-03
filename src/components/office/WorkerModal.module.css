@@ -58,6 +58,13 @@
   gap: 10px;
   padding-right: 36px;
 }
+/* Momentum tag pinned to the top-right of the post area: pushed to the header's
+   right end and aligned to its top edge, clear of the author line and (on the
+   stacked layout) the close button. */
+.momentumSlot {
+  margin-left: auto;
+  align-self: flex-start;
+}
 .avatar {
   flex: none;
   width: 40px;
