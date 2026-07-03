@@ -45,7 +45,10 @@
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  padding: 22px 26px 22px;
+  /* No bottom padding: the sticky action bar owns the bottom gap so it can sit
+     flush against the column's bottom edge instead of floating above a reserved
+     strip of padding. */
+  padding: 22px 26px 0;
 }
 
 /* --- header --------------------------------------------------------------- */
@@ -145,8 +148,13 @@
 .image {
   display: block;
   width: 100%;
-  max-height: 56vh;
-  object-fit: cover;
+  /* Match the video treatment: let the image grow to whatever height it needs
+     within a generous cap and letterbox against the media backdrop rather than
+     cropping, so portrait shots stay fully visible instead of being cut off.
+     The panel's own max-height (92vh) still bounds the modal and hands overflow
+     to the scrolling post column. */
+  max-height: 74vh;
+  object-fit: contain;
 }
 .video {
   display: block;
@@ -205,12 +213,30 @@
 }
 
 /* --- action bar ----------------------------------------------------------- */
+/* Floating bottom overlay: the vote/comment/Open-in-Reddit row is pinned to the
+   bottom of the scrolling post column so it stays reachable no matter how far a
+   long post scrolls, instead of living at the very end of the content. It stays
+   in normal flow (sticky, not absolutely positioned) so it still reserves its
+   own space - the panel and comments-column heights are unchanged - while post
+   content scrolls underneath and fades out into the bar. Negative margins bleed
+   it to the post column's padding edges; the fade gradient is stacked twice so
+   the (semi-transparent) --panel colour reads as opaque under the buttons while
+   the top stays a clean transparent fade. */
 .actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 4px 0 4px;
   flex-wrap: wrap;
+  margin: 8px -26px 0;
+  /* Bottom padding matches the column's 22px top padding so the row sits as far
+     from the bottom edge as the header sits from the top. */
+  padding: 16px 26px 22px;
+  background:
+    linear-gradient(to top, var(--panel) 66%, transparent),
+    linear-gradient(to top, var(--panel) 66%, transparent);
 }
 .voteChip {
   display: flex;
