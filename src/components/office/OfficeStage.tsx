@@ -24,6 +24,9 @@ interface Props {
   ambient: boolean;
   /** Freeze all background motion (a modal is open with pause-on-modal enabled). */
   paused: boolean;
+  /** True while the office first fills (initial data load): the roster walks in
+      from the hallway edges to their cubicles rather than popping in at the desks. */
+  arriving: boolean;
   /** Set for one shuffle relayout: the previous cubicle positions (+ seq), so each
       worker walks from its old desk to its new one. Null when not migrating. */
   migration: LayoutMigration | null;
@@ -54,6 +57,7 @@ export function OfficeStage({
   viewport,
   ambient,
   paused,
+  arriving,
   migration,
   onSelectWorker,
 }: Props) {
@@ -147,6 +151,7 @@ export function OfficeStage({
               pulses={pulses}
               bounds={bounds}
               animate={animate}
+              enter={arriving}
               migration={migrationBySub?.[cubicle.subredditId] ?? null}
               onSelect={onSelectWorker}
             />

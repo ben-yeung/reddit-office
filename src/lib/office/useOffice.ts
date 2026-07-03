@@ -47,6 +47,18 @@ const DEPART_COMMIT_MS = Math.ceil(WALKOUT_MAX_S * 1000) + 400;
  */
 const MIGRATE_WINDOW_MS = Math.ceil(MIGRATE_MAX_S * 1000) + 300;
 
+/** When the office first loads there's a fetch delay, then the roster arrives all
+    at once. Rather than popping in at the desks, that first batch walks in from the
+    hallway edges (like a reverse walk-out). This window stays open just long enough
+    for the batch to mount with the walk-in flagged; later churn fades in as usual. */
+const ARRIVE_WINDOW_MS = 1500;
+
+/** True if any cubicle has at least one worker (the office is populated). */
+function anyWorkers(byCubicle: WorkersByCubicle): boolean {
+  for (const list of Object.values(byCubicle)) if (list.length > 0) return true;
+  return false;
+}
+
 /** A shuffle relayout in flight: the cubicle positions before the shuffle, keyed
     by subreddit, plus a monotonic seq that triggers each worker's migration walk
     exactly once. */
@@ -113,6 +125,9 @@ export interface OfficeApi {
   policy: OfficePolicy;
   setPolicy: (next: OfficePolicy) => void;
   resetLayout: () => void;
+  /** True while the office first fills (initial data load): the roster walks in
+      from the hallway edges to their cubicles rather than popping in at the desks. */
+  arriving: boolean;
   /** Set for one shuffle relayout: the pre-shuffle cubicle positions, so each
       worker can walk from its old desk to its new one. Null when not migrating. */
   migration: LayoutMigration | null;
@@ -141,6 +156,9 @@ export function useOffice(modalOpen: boolean): OfficeApi {
   const [policy, setPolicyState] = useState<OfficePolicy>(DEFAULT_POLICY);
   const [workersByCubicle, setWorkersByCubicle] = useState<WorkersByCubicle>({});
   const [pulses, setPulses] = useState<Record<string, Pulse>>({});
+  // `arriving` is true while the office first fills: that batch walks in from the
+  // hallway edges (see the first-populate handling in startSource).
+  const [arriving, setArriving] = useState(false);
   // Shuffle-migration state: `migration` carries the pre-shuffle cubicle positions
   // (bumped each shuffle) that drive every worker's old-desk -> new-desk walk;
   // `shuffling` gates the control while those walks play (see resetLayout).
@@ -157,6 +175,10 @@ export function useOffice(modalOpen: boolean): OfficeApi {
   // and flushed on resume / when the migration settles.
   const pausedRef = useRef(false);
   const pendingSnapshotRef = useRef<WorkersByCubicle | null>(null);
+  // Armed when the source (re)starts; the first populated snapshot then opens the
+  // walk-in window so the office fills from the hallways instead of popping in.
+  const arriveArmedRef = useRef(false);
+  const arriveTimerRef = useRef<number | null>(null);
   // Shuffle bookkeeping: a synchronous re-entry guard, the seq that triggers each
   // worker's migration walk, a flag that parks snapshots while the walks play, and
   // the settle timer (cleared on unmount).
@@ -172,6 +194,7 @@ export function useOffice(modalOpen: boolean): OfficeApi {
     departingRef.current.clear();
     prevShownRef.current.clear();
     pendingSnapshotRef.current = null;
+    arriveArmedRef.current = true; // the first populated snapshot walks the roster in
     const src = new RedditDemoDataSource(CURATED_SUBREDDITS, l, p);
     sourceRef.current = src;
     src.start({
@@ -183,6 +206,16 @@ export function useOffice(modalOpen: boolean): OfficeApi {
         if (pausedRef.current || migratingRef.current) {
           pendingSnapshotRef.current = s.workersByCubicle;
           return;
+        }
+        // First populated snapshot after the source started (initial load, once the
+        // fetch resolves): open the walk-in window so this batch files in from the
+        // hallways. Flag and workers are set together (auto-batched), so these
+        // workers mount with `enter` true; the window then closes and later churn
+        // fades in at the seats as before.
+        if (arriveArmedRef.current && anyWorkers(s.workersByCubicle)) {
+          arriveArmedRef.current = false;
+          setArriving(true);
+          arriveTimerRef.current = window.setTimeout(() => setArriving(false), ARRIVE_WINDOW_MS);
         }
         // Commit roster departures so an in-flight walk-out isn't cancelled by a
         // jittery re-selection (see commitDepartures).
@@ -344,11 +377,12 @@ export function useOffice(modalOpen: boolean): OfficeApi {
     }, MIGRATE_WINDOW_MS);
   }, [layout]);
 
-  // Clear the pending migration-settle timer on unmount so it can't fire against a
+  // Clear pending shuffle/arrival timers on unmount so they can't fire against a
   // torn-down tree.
   useEffect(
     () => () => {
       if (migrateTimerRef.current != null) clearTimeout(migrateTimerRef.current);
+      if (arriveTimerRef.current != null) clearTimeout(arriveTimerRef.current);
     },
     [],
   );
@@ -361,6 +395,7 @@ export function useOffice(modalOpen: boolean): OfficeApi {
     policy,
     setPolicy,
     resetLayout,
+    arriving,
     migration,
     shuffling,
   };

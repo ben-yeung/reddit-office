@@ -15,6 +15,8 @@ interface Props {
   /** Cubicle-grid perimeter a departing worker walks out to before fading. */
   bounds: Bounds;
   animate: boolean;
+  /** True while the office first fills: these workers walk in from the hallways. */
+  enter: boolean;
   /** Set for one shuffle relayout: this cubicle's old position (+ seq), so its
       workers walk from their old desks to the new ones. Null when not migrating. */
   migration: Migration | null;
@@ -38,6 +40,7 @@ function CubicleGroupInner({
   pulses,
   bounds,
   animate,
+  enter,
   migration,
   onSelect,
 }: Props) {
@@ -90,6 +93,7 @@ function CubicleGroupInner({
             color={subreddit.color}
             pulse={pulses[worker.id]}
             animate={animate}
+            enter={enter}
             migration={migration}
             onSelect={onSelect}
           />

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Cubicle, Vec2 } from "@/lib/domain/types";
 import { CELL_W, CELL_H, type Bounds } from "@/lib/data/layout";
-import { walkBetween, walkOut } from "./walkout";
+import { walkBetween, walkIn, walkOut } from "./walkout";
 
 // A cubicle at grid cell (1, 1), so it has aisles on every side.
 const CUBICLE: Cubicle = {
@@ -107,6 +107,64 @@ describe("walkOut", () => {
       return `${Math.round(e.x)},${Math.round(e.y)}`;
     });
     expect(new Set(ends).size).toBeGreaterThan(1);
+  });
+});
+
+/** A walk-in keyframe converted back to world space (offsets are seat-relative). */
+function inWorld(w: ReturnType<typeof walkIn>, i: number): Vec2 {
+  const seatWorld = { x: CUBICLE.position.x + SEAT.x, y: CUBICLE.position.y + SEAT.y };
+  return { x: w.x[i] + seatWorld.x, y: w.y[i] + seatWorld.y };
+}
+
+describe("walkIn", () => {
+  it("ends exactly on the seat", () => {
+    const w = walkIn("t3_abc", SEAT, CUBICLE, BOUNDS);
+    expect(w.x[w.x.length - 1]).toBe(0); // seat-relative offset (0,0)
+    expect(w.y[w.y.length - 1]).toBe(0);
+  });
+
+  it("starts from a world edge (comes in from the hallway)", () => {
+    const start = inWorld(walkIn("t3_abc", SEAT, CUBICLE, BOUNDS), 0);
+    const onEdge =
+      Math.abs(start.x - BOUNDS.minX) < 1e-6 ||
+      Math.abs(start.x - BOUNDS.maxX) < 1e-6 ||
+      Math.abs(start.y - BOUNDS.minY) < 1e-6 ||
+      Math.abs(start.y - BOUNDS.maxY) < 1e-6;
+    expect(onEdge).toBe(true);
+  });
+
+  it("steps up into the seat from directly below (through the open bottom)", () => {
+    const w = walkIn("t3_abc", SEAT, CUBICLE, BOUNDS);
+    const n = w.x.length;
+    expect(w.x[n - 2]).toBe(0); // straight up: same x as the seat
+    expect(w.y[n - 2]).toBeGreaterThan(0); // arrives from the aisle below
+  });
+
+  it("routes Manhattan along the aisles - every leg is axis-aligned", () => {
+    for (const id of ["t3_a", "t3_b", "t3_c", "t3_d", "t3_e", "t3_f", "t3_g", "t3_h"]) {
+      const w = walkIn(id, SEAT, CUBICLE, BOUNDS);
+      for (let i = 1; i < w.x.length; i++) {
+        const dx = Math.abs(w.x[i] - w.x[i - 1]);
+        const dy = Math.abs(w.y[i] - w.y[i - 1]);
+        expect(Math.min(dx, dy)).toBeLessThan(1e-6);
+      }
+    }
+  });
+
+  it("is the reverse of the same worker's walk-out", () => {
+    const out = walkOut("t3_mirror", SEAT, CUBICLE, BOUNDS);
+    const back = walkIn("t3_mirror", SEAT, CUBICLE, BOUNDS);
+    // Same deterministic route, reversed - and re-based from cubicle-relative
+    // (walk-out) to seat-relative (walk-in).
+    expect(back.x).toEqual([...out.x].reverse().map((x) => x - SEAT.x));
+    expect(back.y).toEqual([...out.y].reverse().map((y) => y - SEAT.y));
+    expect(back.duration).toBeCloseTo(out.duration, 6);
+  });
+
+  it("is deterministic per post id", () => {
+    expect(walkIn("t3_same", SEAT, CUBICLE, BOUNDS)).toEqual(
+      walkIn("t3_same", SEAT, CUBICLE, BOUNDS),
+    );
   });
 });
 
