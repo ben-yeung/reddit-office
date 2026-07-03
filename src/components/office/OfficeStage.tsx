@@ -19,6 +19,8 @@ interface Props {
   camera: Camera;
   viewport: { width: number; height: number };
   ambient: boolean;
+  /** Freeze all background motion (a modal is open with pause-on-modal enabled). */
+  paused: boolean;
   onSelectWorker: (worker: WorkerModel) => void;
 }
 
@@ -45,9 +47,12 @@ export function OfficeStage({
   camera,
   viewport,
   ambient,
+  paused,
   onSelectWorker,
 }: Props) {
-  const animate = camera.zoom >= MOTION_MIN_ZOOM;
+  // `paused` freezes all background motion while a modal is open (pause-on-modal
+  // policy), so the CPU never re-blurs the viewport behind the backdrop.
+  const animate = camera.zoom >= MOTION_MIN_ZOOM && !paused;
 
   function isVisible(x: number, y: number, w: number, h: number): boolean {
     const sx0 = camera.x + x * camera.zoom;
@@ -95,8 +100,9 @@ export function OfficeStage({
       <rect x={0} y={0} width={viewport.width} height={viewport.height} fill="url(#floorSeams)" />
 
       <g transform={`translate(${camera.x} ${camera.y}) scale(${camera.zoom})`}>
-        {/* amenities (always) and ambient NPCs (gated) */}
-        <Decor layout={layout} ambient={ambient} />
+        {/* amenities (always) and ambient NPCs (gated by policy, and frozen
+            while a modal is open so their motion loops stop). */}
+        <Decor layout={layout} ambient={ambient && !paused} />
 
         {layout.cubicles.map((cubicle) => {
           if (!isVisible(cubicle.position.x, cubicle.position.y, cubicle.size.w, cubicle.size.h)) {

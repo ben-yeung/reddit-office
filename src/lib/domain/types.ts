@@ -128,6 +128,12 @@ export interface OfficePolicy {
   theme: OfficeTheme;
   /** Ambient office life: decorative NPCs + their animations. Furniture stays either way. */
   ambient: boolean;
+  /**
+   * Freeze the office (sprite motion + data pipeline) while a modal is open. Keeps
+   * modal open/close animations smooth when the browser has no GPU acceleration,
+   * at the cost of the background pausing. Off by default.
+   */
+  pauseOnModal: boolean;
 }
 
 /** A decorative amenity kind placed on the office floor (not a subreddit). */

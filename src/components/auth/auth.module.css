@@ -57,18 +57,7 @@
   color: var(--ink);
 }
 
-/* --- Login modal --- */
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: grid;
-  place-items: center;
-  padding: 20px;
-  background: rgba(6, 7, 11, 0.62);
-  backdrop-filter: blur(4px);
-  cursor: default;
-}
+/* --- Login modal (backdrop/scrim owned by ModalScrim) --- */
 .card:focus {
   outline: none;
 }
