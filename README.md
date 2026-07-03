@@ -17,11 +17,13 @@ It runs as a single Next.js app: a thin backend does the Reddit OAuth token exch
 ## How it works
 
 - **Demo mode (default).** Unauthenticated visitors get a curated office of iconic subreddits from a shared server-side cache. No secrets required - it falls back to mock data when Reddit credentials aren't configured.
-- **Authenticated mode.** Log in with Reddit to build the office from your own subscriptions. Read-only scopes for subscribed reddits and username; the user token stays in an httpOnly encrypted cookie and never reaches the browser.
-- **Two-speed polling.** Reddit has no push, so Events come from diffing polls: a slower _discovery poll_ (`/new`, `/rising`) finds new/trending posts, and a fast batched _tracking poll_ (`/api/info`) refreshes live scores and comment counts.
-- **Office Policy.** Client-persisted config: worker sourcing (New / Momentum / Blend), per-event animation toggles, theme, and ambient life.
+- **Authenticated mode.** Log in with Reddit to build the office from your own subscriptions. Read-only scopes for subscribed subreddits and username; the user token stays in an httpOnly encrypted cookie and never reaches the browser.
+- **Two-speed polling.** Events come from diffing polls: a slower _discovery poll_ (`/new`, `/rising`) finds new/trending posts, and a fast batched _tracking poll_ (`/api/info`) refreshes live scores and comment counts.
+- **Office Policy.** Client-persisted config: worker sourcing (New / Momentum / Blend), per-event animation toggles, theme, subreddit filtering, and shuffle reordering.
 
-Pan/zoom camera over an SVG office. Click a worker to view the post which outlinks directly to Reddit.
+Pan/zoom camera over an office grid. Click a worker to view the post which outlinks directly to Reddit.
+
+Sprites and details are drawn SVGs on a canvas.
 
 Full design and decision records live in `docs/PRD.md`, `docs/glossary.md`, and `docs/adr/`.
 
