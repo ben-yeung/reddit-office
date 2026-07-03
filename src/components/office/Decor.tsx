@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { motion } from "framer-motion";
+import { motion, useMotionValueEvent, useTime, useTransform } from "framer-motion";
 import type { AmenityPlacement, Layout } from "@/lib/domain/types";
 import { appearanceFor } from "@/lib/worker/appearance";
 import { hashString } from "@/lib/util/rng";
 import { decorWalkers } from "@/lib/office/decor";
-import { PersonSprite } from "./WorkerSprite";
+import { Head, PersonSprite } from "./WorkerSprite";
 
 /**
  * The office's decorative layer: modern-office amenities (glass meeting room,
@@ -54,7 +54,7 @@ function Amenity({
     case "lounge":
       return <Lounge cx={cx} cy={cy} ambient={ambient} seed={seed} />;
     case "coffee":
-      return <CoffeeBar x={position.x} y={position.y + 46} w={size.w} ambient={ambient} seed={seed} />;
+      return <CoffeeBar x={position.x} y={position.y} w={size.w} ambient={ambient} seed={seed} />;
   }
 }
 
@@ -323,6 +323,91 @@ function Lounge({
   );
 }
 
+// Coffee-station palette (concrete hex where CSS vars don't fit the props).
+const STEEL = "#c9ccd4";
+const STEEL_DK = "#9aa0ab";
+const WOOD = "#4a3528";
+const WOOD_HI = "#5e4535";
+const DARK = "#2c2f36";
+const APRON = "#efe9dc";
+const APRON_DK = "#d8d0bf";
+const BARISTA_SHIRT = "#3f5c48";
+
+/*
+ * The whole café is one looping choreography driven by a single shared clock
+ * (`useTime`), so every actor is a pure function of time and they stay in
+ * lockstep by construction - no cross-component messaging. There are SLOTS spots
+ * along the counter; a customer waits at each. Over one LOOP the barista makes a
+ * drink at the machines, carries it DOWN to a slot, hands it over (that customer
+ * leaves with it), and heads back UP to the machines - serving each slot once
+ * per loop. Each customer is the same LOOP-long visit phase-offset by SERVE, and
+ * the barista's delivery to slot k is authored to land exactly on that
+ * customer's take, so the handoff aligns without any coordination.
+ */
+const SLOTS = 3;
+const SERVE = 6; // seconds between deliveries
+const LOOP = SLOTS * SERVE; // full choreography period
+
+// Local-space geometry (relative to the footprint's top-left).
+const SLOT_X = [70, 118, 166]; // the counter spots customers wait at
+const WAIT_Y = 88; // a customer waiting at the counter
+const TAKE_Y = 84; // stepping in to take the drink
+const MACHINE_Y = 36; // barista up at the machine deck
+const DELIVER_Y = 52; // barista down at the counter edge, handing over
+
+// Barista path over one LOOP: machine deck (up) -> down to a slot to deliver ->
+// back up, three times, visiting slots in clock order 1, 0, 2. The delivery
+// frames (y = DELIVER_Y) land at 1.2s, 7.2s and 13.2s, which are exactly where
+// customers 1, 0 and 2 (offset k*SERVE) reach their take - so handoffs align.
+const B_T = [0, 0.04, 0.0667, 0.09, 0.14, 0.22, 0.33, 0.4, 0.44, 0.5, 0.6, 0.7, 0.7333, 0.77, 0.85, 0.95, 1];
+const B_X = [40, 118, 118, 118, 86, 60, 70, 70, 70, 100, 118, 166, 166, 166, 90, 40, 40];
+const B_Y = [
+  MACHINE_Y, 44, DELIVER_Y, 44, MACHINE_Y, MACHINE_Y, 44, DELIVER_Y, 44, MACHINE_Y, MACHINE_Y, 44,
+  DELIVER_Y, 44, MACHINE_Y, MACHINE_Y, MACHINE_Y,
+];
+// Drink visible in the barista's hand on each approach (ends at the handoff).
+const B_CARRY: ReadonlyArray<readonly [number, number]> = [
+  [0.0167, 0.0667],
+  [0.35, 0.4],
+  [0.6833, 0.7333],
+];
+
+// One customer's LOOP-long visit (fractions): arrive at the slot, wait, lean in
+// to the counter (0.40), pick the drink up off it (0.48), leave with it, then
+// stay off-screen until the next loop.
+const C_T = [0, 0.05, 0.36, 0.4, 0.48, 0.56, 0.62, 0.64, 1];
+const C_DX = [0, 0, 0, 0, 0, 7, 7, 0, 0]; // sideways drift while leaving
+const C_Y = [130, WAIT_Y, WAIT_Y, TAKE_Y, TAKE_Y, 120, 132, 130, 130];
+const C_O = [0, 1, 1, 1, 1, 1, 0, 0, 0];
+const SLOT_CUP_Y = 64; // the drink resting on the counter at a spot
+const C_PLACED = [0.4, 0.48] as const; // barista sets it down -> customer takes it
+const C_CUP = [0.48, 0.6] as const; // drink in the customer's hand as they leave
+
+/** Piecewise-linear sample of `vals` at fraction `f` over knots `ts` (both 0..1). */
+function pw(f: number, ts: number[], vals: number[]): number {
+  for (let i = 1; i < ts.length; i++) {
+    if (f <= ts[i]) {
+      const span = ts[i] - ts[i - 1];
+      const u = span === 0 ? 0 : (f - ts[i - 1]) / span;
+      return vals[i - 1] + (vals[i] - vals[i - 1]) * u;
+    }
+  }
+  return vals[vals.length - 1];
+}
+
+/** True when `f` falls in any of the [start, end] windows. */
+function inWindow(f: number, windows: ReadonlyArray<readonly [number, number]>): boolean {
+  return windows.some(([a, b]) => f >= a && f <= b);
+}
+
+/**
+ * The office café, viewed bird's-eye like the rest of the floor. A two-tier
+ * structure: a back bar carrying the machines (espresso rig, grinder, drip
+ * brewer, pastry case) under a chalk menu, and a front serving counter that
+ * occludes the barista's legs so they read as standing behind it. When `ambient`
+ * is on, a barista shuttles between the machines "making drinks" and a rotating
+ * cast of customers queues up and leaves.
+ */
 function CoffeeBar({
   x,
   y,
@@ -337,18 +422,249 @@ function CoffeeBar({
   seed: string;
 }) {
   return (
-    <g>
-      <rect x={x} y={y} width={w} height={24} rx={4} fill="var(--desk)" />
-      <rect x={x} y={y} width={w} height={5} fill="var(--desk-hi)" />
-      <rect x={x + 14} y={y - 20} width={26} height={22} rx={3} fill="#3a3f4b" />
-      <rect x={x + 18} y={y - 16} width={18} height={6} fill="#8fd3ff" opacity={0.6} />
-      <circle cx={x + 27} cy={y - 4} r={2} fill="#d23a3a" />
-      <circle cx={x + 62} cy={y + 11} r={4} fill="#e7e2d8" />
-      <circle cx={x + 76} cy={y + 11} r={4} fill="#e7e2d8" />
-      {[0, 1, 2, 3].map((i) => (
-        <circle key={i} cx={x + 34 + i * 44} cy={y + 40} r={9} fill="var(--chair)" />
+    <g transform={`translate(${x},${y})`}>
+      {/* floor mat that grounds the whole station */}
+      <rect x={-6} y={44} width={w + 12} height={66} rx={12} fill="var(--rug)" opacity={0.5} />
+
+      {/* back bar cabinet: the machine deck */}
+      <rect x={10} y={6} width={w - 20} height={22} rx={3} fill={WOOD} />
+      <rect x={10} y={6} width={w - 20} height={5} rx={3} fill={WOOD_HI} />
+
+      {/* chalk menu board mounted above the bar */}
+      <rect x={14} y={-12} width={56} height={16} rx={2} fill="#20281f" stroke="#3a4a33" strokeWidth={1} />
+      {[0, 1, 2].map((i) => (
+        <rect key={i} x={18} y={-9 + i * 4.4} width={30 - i * 6} height={1.6} rx={0.8} fill="#7fae6a" opacity={0.85} />
       ))}
-      {ambient && <Idler x={x + 40} y={y - 16} seed={`${seed}-coffee`} />}
+      <circle cx={62} cy={-4} r={2} fill="#d9a441" />
+
+      <EspressoMachine x={40} />
+      <Grinder x={86} />
+      <DripBrewer x={118} />
+      <PastryCase x={146} />
+
+      {/* the barista behind the counter, and a customer stepping up to be served
+          (drawn before the counter so the counter hides their lower halves) */}
+      {ambient && <Barista seed={`${seed}-barista`} />}
+
+      {/* front serving counter, drawn over the barista to hide the legs */}
+      <rect x={8} y={52} width={w - 16} height={20} rx={3} fill="var(--desk)" />
+      <rect x={8} y={52} width={w - 16} height={4} rx={3} fill="var(--desk-hi)" />
+      <rect x={8} y={70} width={w - 16} height={3} fill="rgba(0,0,0,0.18)" />
+
+      {/* a spare cup on the deck + a tip jar */}
+      <Cup x={22} y={62} />
+      <rect x={182} y={57} width={7} height={11} rx={2} fill="#bfe0f0" opacity={0.7} />
+      <rect x={182} y={57} width={7} height={2.5} rx={2} fill="#a9c9db" />
+
+      {/* stools between the counter spots */}
+      <Stool x={94} />
+      <Stool x={142} />
+
+      {/* one customer per counter spot: arrive, wait, get served, leave */}
+      {ambient &&
+        Array.from({ length: SLOTS }, (_, i) => (
+          <Customer key={i} slot={i} seed={`${seed}-c${i}`} />
+        ))}
     </g>
+  );
+}
+
+/** Stainless espresso machine: twin group heads, portafilters, steam wand, and
+    a row of cups warming on top. `x` is the local station center. */
+function EspressoMachine({ x }: { x: number }) {
+  return (
+    <g transform={`translate(${x},0)`}>
+      <rect x={-22} y={20} width={44} height={7} rx={1.5} fill={STEEL_DK} />
+      <rect x={-22} y={4} width={44} height={18} rx={2} fill={STEEL} />
+      <rect x={-22} y={4} width={44} height={4} rx={2} fill="#e6e8ee" />
+      {/* group heads + portafilter handles */}
+      <rect x={-14} y={22} width={7} height={5} rx={1} fill="#3a3f4b" />
+      <rect x={7} y={22} width={7} height={5} rx={1} fill="#3a3f4b" />
+      <rect x={-13} y={26} width={5} height={2.5} rx={1} fill="#20242c" />
+      <rect x={8} y={26} width={5} height={2.5} rx={1} fill="#20242c" />
+      {/* steam wand */}
+      <rect x={-21} y={12} width={3} height={10} rx={1} fill="#8b9099" />
+      {/* control knobs */}
+      <circle cx={-4} cy={9} r={1.6} fill="#d23a3a" />
+      <circle cx={0} cy={9} r={1.6} fill="#2d7d46" />
+      <circle cx={4} cy={9} r={1.6} fill="#e6e8ee" />
+      {/* cups warming on top */}
+      <circle cx={-10} cy={2.5} r={2} fill="#e7e2d8" />
+      <circle cx={-4} cy={2.5} r={2} fill="#e7e2d8" />
+      <circle cx={2} cy={2.5} r={2} fill="#e7e2d8" />
+    </g>
+  );
+}
+
+/** Burr grinder with a bean hopper. */
+function Grinder({ x }: { x: number }) {
+  return (
+    <g transform={`translate(${x},0)`}>
+      <path d="M-6,2 L6,2 L4,10 L-4,10 Z" fill="#3a2f26" opacity={0.85} />
+      <path d="M-6,2 L6,2 L4,10 L-4,10 Z" fill="none" stroke="#5a4636" strokeWidth={0.8} />
+      <rect x={-6} y={10} width={12} height={16} rx={1.5} fill={DARK} />
+      <rect x={-6} y={10} width={12} height={3} fill="#464b55" />
+      <rect x={-3} y={22} width={6} height={4} fill="#5a5f6b" />
+    </g>
+  );
+}
+
+/** Batch-brew drip station with twin warmer plates and carafes. */
+function DripBrewer({ x }: { x: number }) {
+  return (
+    <g transform={`translate(${x},0)`}>
+      <rect x={-11} y={6} width={22} height={20} rx={2} fill="#3a3f4b" />
+      <rect x={-11} y={6} width={22} height={4} rx={2} fill="#4b515f" />
+      <rect x={-9} y={22} width={9} height={4} rx={1} fill="#20242c" />
+      <rect x={1} y={22} width={9} height={4} rx={1} fill="#20242c" />
+      <path d="M-7,17 L-2,17 L-2.6,22 L-6.4,22 Z" fill="#5a3a24" opacity={0.85} />
+      <path d="M3,17 L8,17 L7.4,22 L3.6,22 Z" fill="#3a2a1a" opacity={0.85} />
+      <circle cx={7} cy={10} r={1.4} fill="#d23a3a" />
+    </g>
+  );
+}
+
+/** Glass pastry case; `x` is its left edge. */
+function PastryCase({ x }: { x: number }) {
+  const top = ["#c98a3a", "#d8b06a", "#a8632f", "#e0c98a"];
+  const bot = ["#b5772f", "#caa25c", "#8f5327", "#d3bd7e"];
+  return (
+    <g transform={`translate(${x},0)`}>
+      <rect x={0} y={8} width={40} height={18} rx={2} fill="#dfe6ee" opacity={0.35} stroke="#aeb6c2" strokeWidth={1} />
+      <rect x={0} y={8} width={40} height={2} fill="#c3cad4" />
+      {[6, 16, 26, 34].map((px, i) => (
+        <g key={i}>
+          <ellipse cx={px} cy={15} rx={3} ry={2.2} fill={top[i]} />
+          <ellipse cx={px} cy={21} rx={3} ry={2.2} fill={bot[i]} />
+        </g>
+      ))}
+    </g>
+  );
+}
+
+/** A to-go cup with a lid and a wisp handle. */
+function Cup({ x, y }: { x: number; y: number }) {
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <rect x={-3} y={-3} width={6} height={7} rx={1.5} fill="#f2ede3" />
+      <rect x={-3} y={-3} width={6} height={2} fill="#ffffff" />
+    </g>
+  );
+}
+
+/** A round bar stool (bird's-eye). */
+function Stool({ x }: { x: number }) {
+  return (
+    <g transform={`translate(${x},0)`}>
+      <circle cx={0} cy={88} r={7} fill="var(--chair)" />
+      <circle cx={0} cy={88} r={3.5} fill="rgba(0,0,0,0.15)" />
+    </g>
+  );
+}
+
+/** Three wisps of steam rising and fading, staggered. */
+function Steam({ x, y }: { x: number; y: number }) {
+  return (
+    <g transform={`translate(${x},${y})`}>
+      {[0, 1, 2].map((i) => (
+        <motion.circle
+          key={i}
+          cx={(i - 1) * 2.2}
+          r={1.5}
+          fill="#ffffff"
+          initial={{ cy: 0, opacity: 0 }}
+          animate={{ cy: [0, -9], opacity: [0, 0.5, 0] }}
+          transition={{ duration: 1.9, delay: i * 0.45, repeat: Infinity, ease: "easeOut" }}
+        />
+      ))}
+    </g>
+  );
+}
+
+/** Aproned barista: a green-shirted body with a cream apron, head drawn last so
+    it sits cleanly on top of the apron. */
+function BaristaSprite({ seed }: { seed: string }) {
+  return (
+    <g className="pixelated">
+      <ellipse cx={0} cy={11} rx={13} ry={4.5} fill="rgba(0,0,0,0.24)" />
+      <rect x={-10} y={-6} width={20} height={18} rx={7} fill={BARISTA_SHIRT} />
+      <rect x={-8} y={0} width={16} height={11} rx={2} fill={APRON} />
+      <rect x={-8} y={0} width={16} height={2.4} fill={APRON_DK} />
+      <path d="M-5,-4 L-4.5,0 M5,-4 L4.5,0" stroke={APRON_DK} strokeWidth={1.3} fill="none" />
+      <Head a={appearanceFor(seed)} />
+    </g>
+  );
+}
+
+/**
+ * The barista, driven by the shared clock over one LOOP: works the machine deck
+ * (up), carries a drink DOWN to a counter slot, hands it over, and heads back up,
+ * serving each slot once per loop. A small bob keeps them busy at the machines.
+ */
+function Barista({ seed }: { seed: string }) {
+  const time = useTime();
+  const frac = (t: number) => ((t / 1000) % LOOP) / LOOP;
+  const x = useTransform(time, (t) => pw(frac(t), B_T, B_X));
+  const y = useTransform(time, (t) => {
+    const bob = ((t / 1000) % 0.85) / 0.85;
+    return pw(frac(t), B_T, B_Y) - 0.8 * (0.5 - 0.5 * Math.cos(2 * Math.PI * bob));
+  });
+  const carrying = useTransform(time, (t) => (inWindow(frac(t), B_CARRY) ? 1 : 0));
+  return (
+    <motion.g style={{ x, y }}>
+      <BaristaSprite seed={seed} />
+      <motion.g style={{ opacity: carrying }}>
+        <Cup x={9} y={2} />
+        <Steam x={9} y={-2} />
+      </motion.g>
+    </motion.g>
+  );
+}
+
+/**
+ * One customer at counter spot `slot`, driven by the shared clock. The same
+ * LOOP-long visit is phase-offset by `slot * SERVE`, so the barista's delivery to
+ * this slot lands exactly on the customer's take: they walk up, wait, take the
+ * drink, and leave with it. A fresh face takes the spot each loop.
+ */
+function Customer({ slot, seed }: { slot: number; seed: string }) {
+  const time = useTime();
+  const off = slot * SERVE;
+  const sx = SLOT_X[slot];
+  const frac = (t: number) => ((t / 1000 + off) % LOOP) / LOOP;
+  const x = useTransform(time, (t) => sx + pw(frac(t), C_T, C_DX));
+  const y = useTransform(time, (t) => pw(frac(t), C_T, C_Y));
+  const o = useTransform(time, (t) => pw(frac(t), C_T, C_O));
+  // Drink resting on the counter (set down by the barista, then taken).
+  const resting = useTransform(time, (t) => (inWindow(frac(t), [C_PLACED]) ? 1 : 0));
+  // Drink in the customer's hand once they've picked it up.
+  const inHand = useTransform(time, (t) => (inWindow(frac(t), [C_CUP]) ? 1 : 0));
+
+  // Bump a per-loop nonce (while off-screen) so each visit is a different person.
+  const [loop, setLoop] = useState(0);
+  const loopRef = useRef(0);
+  useMotionValueEvent(time, "change", (t) => {
+    const n = Math.floor((t / 1000 + off) / LOOP);
+    if (n !== loopRef.current) {
+      loopRef.current = n;
+      setLoop(n);
+    }
+  });
+  const s = `${seed}:${loop}`;
+
+  return (
+    <>
+      {/* the drink the barista set down on the counter at this spot */}
+      <motion.g style={{ opacity: resting }} transform={`translate(${sx},${SLOT_CUP_Y})`}>
+        <Cup x={0} y={0} />
+        <Steam x={0} y={-4} />
+      </motion.g>
+      <motion.g style={{ x, y, opacity: o }}>
+        <PersonSprite appearance={appearanceFor(s)} color={neut(s)} />
+        <motion.g style={{ opacity: inHand }}>
+          <Cup x={9} y={-1} />
+        </motion.g>
+      </motion.g>
+    </>
   );
 }
