@@ -308,3 +308,24 @@ export function meIconUrl(me: RedditMe): string | null {
   const clean = raw.split("?")[0];
   return clean || null;
 }
+
+/** The subset of a subreddit `/about` (`t5`) object we consume. */
+interface RedditAbout {
+  data?: {
+    /** Modern styled community icon; often carries `?width=…&s=…` params. */
+    community_icon?: string;
+    /** Classic square icon; used when there's no community_icon. */
+    icon_img?: string;
+  };
+}
+
+/**
+ * The community's icon URL from `/r/{name}/about`, or undefined when the sub has
+ * none. Prefers the modern `community_icon` (keeping its query params) and falls
+ * back to the classic `icon_img`; both are HTML-escaped in the JSON.
+ */
+export function mapAboutIcon(json: unknown): string | undefined {
+  const data = (json as RedditAbout).data;
+  const raw = (data?.community_icon || data?.icon_img || "").trim();
+  return raw ? unescapeHtml(raw) : undefined;
+}

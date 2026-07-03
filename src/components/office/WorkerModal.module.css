@@ -69,6 +69,15 @@
   font-weight: 800;
   font-size: 1.1rem;
 }
+/* Real community icon: same footprint as the letter tile. The sub color sits
+   behind it so a transparent/loading icon still reads as the sub's accent. */
+.avatarImg {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+}
 .headText {
   min-width: 0;
 }

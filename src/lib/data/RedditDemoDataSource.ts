@@ -38,6 +38,8 @@ export class RedditDemoDataSource implements DataSource {
   private fallback: MockDataSource | null = null;
 
   private postsBySub: Record<string, RedditPostDTO[]> = {};
+  /** Emit the server's enriched subreddits (with icons) once; they don't change. */
+  private emittedSubreddits = false;
   private readonly seats = new Map<string, Record<string, number>>();
   private readonly prevSelection = new Map<string, Set<string>>();
   private readonly prevTop = new Map<string, string>();
@@ -89,6 +91,13 @@ export class RedditDemoDataSource implements DataSource {
       if (!payload.configured) {
         this.useFallback();
         return; // stop polling; the mock drives from here.
+      }
+
+      // Surface server-side subreddit metadata (community icons) once. Ids match
+      // the constructor list, so the layout - keyed by id - is unaffected.
+      if (!this.emittedSubreddits && payload.subreddits.length > 0) {
+        this.emittedSubreddits = true;
+        this.handlers.onSubreddits?.(payload.subreddits);
       }
 
       this.postsBySub = payload.postsBySub;
