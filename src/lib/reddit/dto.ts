@@ -3,7 +3,7 @@
  * (auth context, demo data source). Pure types + no server-only imports, so
  * this module is safe to import from client components.
  */
-import type { Subreddit } from "@/lib/domain/types";
+import type { PostKind, Subreddit } from "@/lib/domain/types";
 
 /** Identifies the `postMessage` the OAuth popup sends back to the opener. */
 export const AUTH_MESSAGE_SOURCE = "reddit-office-auth";
@@ -23,6 +23,14 @@ export interface RedditPostDTO {
   title: string;
   author: string;
   body: string;
+  /** How the post presents its content (mirrors Reddit's `post_hint`). */
+  kind: PostKind;
+  /** Preview/content image URL for image and link posts, when Reddit provides one. */
+  image?: string;
+  /** External domain for link posts, e.g. "themirror.com". */
+  linkDomain?: string;
+  /** Post flair text, when set. */
+  flair?: string;
   permalink: string;
   /** ms epoch. */
   createdAt: number;
@@ -41,6 +49,29 @@ export interface DemoOfficePayload {
   /** Curated posts keyed by subreddit id (each sub's current hot listing). */
   postsBySub: Record<string, RedditPostDTO[]>;
   /** When `configured` is false, why (for a subtle UI hint). */
+  reason?: string;
+}
+
+/** A single top-level comment, normalized for the modal's comments column. */
+export interface RedditCommentDTO {
+  /** Fullname, e.g. "t1_abc123". */
+  id: string;
+  author: string;
+  body: string;
+  score: number;
+  /** ms epoch. */
+  createdAt: number;
+  /** Absolute reddit.com URL to this specific comment. */
+  permalink: string;
+}
+
+/** Payload of `GET /api/demo/comments`. */
+export interface DemoCommentsPayload {
+  /** `false` when credentials are absent or the fetch failed (client falls back). */
+  configured: boolean;
+  /** Top-upvoted top-level comments, capped server-side. */
+  comments: RedditCommentDTO[];
+  /** When `configured` is false, why. */
   reason?: string;
 }
 

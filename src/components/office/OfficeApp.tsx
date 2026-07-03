@@ -29,6 +29,10 @@ export function OfficeApp() {
   const size = useElementSize(containerRef);
   const { camera, panBy, zoomAt, fitTo } = useCamera();
   const [selected, setSelected] = useState<Selection | null>(null);
+  // While a modal is open, freeze office pan/zoom. The modal is portaled to
+  // <body>, but React re-dispatches its events through the React tree to the
+  // stage handlers below, so a text-selection drag would otherwise pan the office.
+  const interactionLocked = selected !== null;
 
   const subredditsById = useMemo(
     () => Object.fromEntries(office.subreddits.map((s) => [s.id, s] as const)),
@@ -59,13 +63,14 @@ export function OfficeApp() {
     const el = containerRef.current;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
+      if (interactionLocked) return;
       e.preventDefault();
       const rect = el.getBoundingClientRect();
       zoomAt(e.clientX - rect.left, e.clientY - rect.top, Math.exp(-e.deltaY * 0.0015));
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
-  }, [zoomAt]);
+  }, [zoomAt, interactionLocked]);
 
   const drag = useRef({ active: false, x: 0, y: 0 });
 
@@ -74,11 +79,11 @@ export function OfficeApp() {
       ref={containerRef}
       className={styles.stage}
       onPointerDown={(e) => {
-        if (e.button !== 0) return;
+        if (interactionLocked || e.button !== 0) return;
         drag.current = { active: true, x: e.clientX, y: e.clientY };
       }}
       onPointerMove={(e) => {
-        if (!drag.current.active) return;
+        if (interactionLocked || !drag.current.active) return;
         panBy(e.clientX - drag.current.x, e.clientY - drag.current.y);
         drag.current.x = e.clientX;
         drag.current.y = e.clientY;
