@@ -8,6 +8,11 @@ interface Props {
   policy: OfficePolicy;
   onChange: (next: OfficePolicy) => void;
   onReset: () => void;
+  /**
+   * Reopen the onboarding subreddit picker. Present only in authenticated mode -
+   * the demo office has no picker, so the button is hidden there.
+   */
+  onEditSubreddits?: () => void;
 }
 
 const SOURCING: Array<{ value: SourcingRule; label: string }> = [
@@ -24,7 +29,7 @@ const EVENTS: Array<{ value: WorkerEventType; label: string }> = [
 ];
 
 /** The Office Policy panel: worker sourcing + per-event animation toggles (ADR-0005). */
-export function PolicyPanel({ policy, onChange, onReset }: Props) {
+export function PolicyPanel({ policy, onChange, onReset, onEditSubreddits }: Props) {
   const [open, setOpen] = useState(true);
 
   function setSourcing(sourcing: SourcingRule) {
@@ -146,6 +151,12 @@ export function PolicyPanel({ policy, onChange, onReset }: Props) {
               </button>
             </div>
           </div>
+
+          {onEditSubreddits && (
+            <button className={styles.editSubs} onClick={onEditSubreddits}>
+              Reselect subreddits
+            </button>
+          )}
 
           <button className={styles.reset} onClick={onReset}>
             Shuffle office layout

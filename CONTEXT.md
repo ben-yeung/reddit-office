@@ -53,9 +53,9 @@ A gamified Reddit client that visualizes a user's subscription ecosystem as an 8
 3. [x] **Layer 1:** Grid/cubicle layout via SVG/math-based rendering, with a procedural floor plan (aisles, amenities, meeting rooms).
 4. [x] **Layer 2:** Mock data source driving the Framer Motion interaction logic (`MockDataSource`).
 5. [~] **Layer 3:** Reddit API integration (raw REST via a thin server proxy).
-   Demo mode is live (app-only token + shared cache); the authenticated real-time two-speed polling engine is still pending (ADR-0002).
+   Demo mode is live (app-only token + shared cache), and the authenticated office renders the user's picked subreddits via on-demand polling; the real-time two-speed polling engine (surge/removed) is still pending (ADR-0002).
 6. [~] **Configuration:** Office Policy panel exists (sourcing rule, event toggles, theme, ambient).
-   The subreddit whitelist and the post-login onboarding sub-picker are still pending.
+   The post-login onboarding sub-picker is live (choose up to a floor's worth of your subscriptions, re-pick from the policy panel); a persistent in-office whitelist/blacklist is still pending.
 
 Legend: `[x]` done, `[~]` in progress, `[ ]` not started.
 
@@ -80,10 +80,14 @@ The flow uses `duration=temporary`, so Reddit issues a 1-hour access token and n
 Reddit tokens never reach the browser: they live in an httpOnly, Secure, SameSite=Lax, AES-256-GCM-encrypted session cookie, and the client only ever calls our proxy.
 See ADR-0008.
 
+After login, onboarding drives the authenticated experience: a picker lists the user's subscriptions (`/api/reddit/my-subreddits`, mapped server-side and ordered by subscriber count) and they choose which become cubicles, capped at the tuned demo grid size so the floor stays readable.
+The pick is persisted per user in `localStorage`, so return visits land straight in the office; the Office Policy panel's "Reselect subreddits" button reopens the picker (uncheck one to swap when at the cap).
+The office itself is built from the picked subs via `PollingOfficeDataSource` against `/api/reddit/office`, which fetches each sub's hot posts with the user's token (sharing the same `fetchOfficeForSubs` primitive as demo mode).
+
 ### The DataSource seam
 
 The office UI depends only on the domain types and a single `DataSource` interface, so the mock simulation and the real Reddit layer are interchangeable with no UI changes.
-`MockDataSource` drives development and is also the graceful-degradation fallback; `RedditDemoDataSource` renders real posts for demo mode.
+`MockDataSource` drives development and is also the graceful-degradation fallback; `PollingOfficeDataSource` renders real posts by polling a server office endpoint, and one instance serves both modes - the injected `fetchPayload` points at the shared-cached `/api/demo/office` for demo, or POSTs the user's picks to `/api/reddit/office` for the authenticated office.
 
 ### Graceful degradation
 

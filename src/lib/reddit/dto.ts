@@ -77,6 +77,31 @@ export interface DemoCommentsPayload {
   reason?: string;
 }
 
+/** One of the logged-in user's subscribed subreddits, for the onboarding picker. */
+export interface SubscribedSubredditDTO {
+  /** Fullname-style id, e.g. "t5_2fwo". */
+  id: string;
+  /** Bare name, e.g. "programming". */
+  name: string;
+  /** Display form, e.g. "r/programming". */
+  displayName: string;
+  /** Community icon URL (community_icon || icon_img), when the sub has one. */
+  iconUrl?: string;
+  /** Subscriber count, used to order the picker (most-subscribed first). */
+  subscribers: number;
+  /** Whether the sub is marked NSFW. */
+  over18: boolean;
+}
+
+/** Payload of `GET /api/reddit/my-subreddits` (the logged-in user's subscriptions). */
+export interface MySubredditsPayload {
+  /** `false` when there is no live session (client returns to demo). */
+  configured: boolean;
+  subreddits: SubscribedSubredditDTO[];
+  /** When `configured` is false, why. */
+  reason?: string;
+}
+
 /** Payload of `GET /api/auth/me`. */
 export interface AuthMePayload {
   /** Whether login is even possible (credentials + session secret present). */

@@ -12,25 +12,32 @@ import { selectRoster, assignSeats, type RosterCandidate } from "@/lib/roster/ro
 import { MockDataSource } from "./MockDataSource";
 import type { DemoOfficePayload, RedditPostDTO } from "@/lib/reddit/dto";
 
-/** How often the client re-reads the (server-shared-cached) demo endpoint. */
+/** How often the client re-reads the (server-shared-cached) office endpoint. */
 const POLL_MS = 30_000;
 
+/** Fetches an office payload from the server; different modes point at different endpoints. */
+export type OfficePayloadFetcher = () => Promise<DemoOfficePayload>;
+
 /**
- * Demo-mode DataSource (ADR-0009). Reads the curated office from
- * `/api/demo/office` and renders real Reddit hot posts as Workers, reusing the
- * same roster/seat logic as the mock. New-post and trending Events are derived
- * by diffing successive snapshots.
+ * The live-Reddit DataSource. Polls a server office endpoint for real hot posts
+ * and renders them as Workers, reusing the same roster/seat logic as the mock.
+ * New-post and trending Events are derived by diffing successive snapshots.
  *
- * If the endpoint reports Reddit is not configured, it transparently delegates
- * to {@link MockDataSource} so the office is always alive (graceful degradation).
- * The full two-speed polling event engine (surge/removed, ADR-0002) lands with
- * the authenticated data layer; demo intentionally keeps to the cheap, reliable
- * events.
+ * The endpoint is injected as a `fetchPayload` callback, so one implementation
+ * drives both modes: demo reads the shared-cached `/api/demo/office`, and the
+ * authenticated office POSTs the user's picked subs to `/api/reddit/office`. Both
+ * return the same payload shape.
+ *
+ * If the endpoint reports Reddit is not configured, it transparently delegates to
+ * {@link MockDataSource} so the office is always alive (graceful degradation). The
+ * full two-speed polling event engine (surge/removed, ADR-0002) lands later; this
+ * keeps to the cheap, reliable events.
  */
-export class RedditDemoDataSource implements DataSource {
+export class PollingOfficeDataSource implements DataSource {
   private readonly subreddits: Subreddit[];
   private readonly layout: Layout;
   private policy: OfficePolicy;
+  private readonly fetchPayload: OfficePayloadFetcher;
 
   private handlers: DataSourceHandlers | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -44,10 +51,16 @@ export class RedditDemoDataSource implements DataSource {
   private readonly prevSelection = new Map<string, Set<string>>();
   private readonly prevTop = new Map<string, string>();
 
-  constructor(subreddits: Subreddit[], layout: Layout, policy: OfficePolicy) {
+  constructor(
+    subreddits: Subreddit[],
+    layout: Layout,
+    policy: OfficePolicy,
+    fetchPayload: OfficePayloadFetcher,
+  ) {
     this.subreddits = subreddits;
     this.layout = layout;
     this.policy = policy;
+    this.fetchPayload = fetchPayload;
   }
 
   listSubreddits(): Subreddit[] {
@@ -84,8 +97,7 @@ export class RedditDemoDataSource implements DataSource {
 
   private async poll(): Promise<void> {
     try {
-      const res = await fetch("/api/demo/office", { cache: "no-store" });
-      const payload = (await res.json()) as DemoOfficePayload;
+      const payload = await this.fetchPayload();
       if (this.stopped || !this.handlers) return;
 
       if (!payload.configured) {
