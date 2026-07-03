@@ -140,6 +140,8 @@ export function OfficeApp({
         viewport={size}
         ambient={office.policy.ambient}
         paused={freezeBackground}
+        arriving={office.arriving}
+        migration={office.migration}
         onSelectWorker={onSelectWorker}
       />
 
@@ -157,6 +159,7 @@ export function OfficeApp({
         policy={office.policy}
         onChange={office.setPolicy}
         onReset={office.resetLayout}
+        shuffling={office.shuffling}
         onEditSubreddits={onEditSubreddits}
       />
 

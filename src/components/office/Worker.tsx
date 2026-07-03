@@ -1,16 +1,29 @@
 "use client";
 
-import { useEffect, useMemo, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useMemo, type CSSProperties } from "react";
 import { motion, useAnimationControls } from "framer-motion";
 import type { Cubicle as CubicleModel, Vec2, Worker as WorkerModel } from "@/lib/domain/types";
 import type { Bounds } from "@/lib/data/layout";
 import type { WorkerAppearance } from "@/lib/worker/appearance";
 import type { Pulse } from "@/lib/office/useOffice";
-import { walkOut } from "@/lib/office/walkout";
+import { walkBetween, walkIn, walkOut } from "@/lib/office/walkout";
 import { WorkerDesk, WorkerBody } from "./WorkerSprite";
 import styles from "./Worker.module.css";
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+// The migration walk must position the worker at its old desk before the browser
+// paints the reshuffled layout, so it runs in a layout effect. Fall back to a
+// passive effect on the server, where layout effects don't run (and there's no
+// migration anyway).
+const useIsomorphicLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
+/** A worker's old cubicle position + a monotonic id, set for one shuffle relayout
+    so each worker walks from its previous desk to its new one. */
+export interface Migration {
+  fromPos: Vec2;
+  seq: number;
+}
 
 function formatScore(n: number): string {
   if (n >= 10_000) return `${(n / 1000).toFixed(0)}k`;
@@ -68,15 +81,24 @@ interface Props {
   pulse?: Pulse;
   /** Whether idle motion runs. Gated off when zoomed too far out to perceive it. */
   animate: boolean;
+  /** True for a worker mounting as the office first fills (initial data load): it
+      walks in from a hallway edge to its seat instead of appearing at the desk. */
+  enter: boolean;
+  /** Set for one shuffle relayout: the worker walks from its old desk to this new
+      one. Same worker, same subreddit - only the cubicle's grid cell changed. */
+  migration: Migration | null;
   onSelect: (worker: WorkerModel) => void;
 }
 
 /**
- * The person half of a post-as-worker: fades in on the seat (sitting down at the
- * desk fixture behind it) and, on replacement, walks the aisles out to the grid
- * edge before fading. This layer also adds behavior - trending glow, momentum-
- * driven bob speed, and one-shot Actions (surge pop, trending wobble) from event
- * pulses. The desk is a separate layer (WorkerDeskSlot) and stays put.
+ * The person half of a post-as-worker. It fades in on the seat, and on removal
+ * walks the aisles out to the grid edge before fading. Two variations use an inner
+ * offset group so the outer group's enter/exit/opacity stay untouched: when the
+ * office first loads it walks IN from a hallway edge to its seat (`enter`), and on
+ * a shuffle relayout it walks from its old desk to its new one (`migration`, the
+ * cubicle having jumped to its new cell). This layer also adds behavior - trending
+ * glow, momentum-driven bob speed, and one-shot Actions (surge pop, trending
+ * wobble) from event pulses. The desk is a separate layer (WorkerDeskSlot).
  */
 export function Worker({
   worker,
@@ -87,10 +109,63 @@ export function Worker({
   color,
   pulse,
   animate,
+  enter,
+  migration,
   onSelect,
 }: Props) {
   const sprite = useAnimationControls();
   const fx = useAnimationControls();
+  // One inner group drives both aisle travels (they never overlap in time): the
+  // walk-in on mount, and the desk-to-desk migration on a shuffle. At rest it sits
+  // at (0,0) - dead on the seat.
+  const offsetCtl = useAnimationControls();
+
+  // Walk-in (initial load): come in from a hallway edge to the seat. Frozen at
+  // mount via a deterministic memo, so a later re-render (or the arrival window
+  // closing) can't restart it. `enterInitial` places the inner group at the edge
+  // pre-paint (framer applies `initial` on mount), then the effect walks it to the
+  // seat. A no-op for anyone not arriving.
+  const enterWalk = useMemo(
+    () => (enter && animate ? walkIn(worker.id, seat, cubicle, bounds) : null),
+    [enter, animate, worker.id, seat, cubicle, bounds],
+  );
+  const enterInitial = enterWalk ? { x: enterWalk.x[0], y: enterWalk.y[0] } : { x: 0, y: 0 };
+
+  useEffect(() => {
+    if (!enterWalk) return;
+    offsetCtl.start({
+      x: enterWalk.x,
+      y: enterWalk.y,
+      transition: {
+        x: { duration: enterWalk.duration, times: enterWalk.times, ease: "linear" },
+        y: { duration: enterWalk.duration, times: enterWalk.times, ease: "linear" },
+      },
+    });
+    // Runs once on mount so the walk-in plays a single time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Migration (shuffle relayout): the cubicle jumps to its new cell, so this worker
+  // would otherwise pop straight to the new desk. Instead we walk the inner group
+  // from the old desk to the new one: snap to the old-desk offset before paint,
+  // then animate back to (0,0). Keyed on the migration seq so it fires exactly once
+  // per shuffle, never on a plain re-render (pulse/snapshot).
+  useIsomorphicLayoutEffect(() => {
+    if (!migration || !animate) return;
+    const move = walkBetween(worker.id, seat, migration.fromPos, cubicle.position);
+    if (!move) return;
+    offsetCtl.set({ x: move.x[0], y: move.y[0] });
+    offsetCtl.start({
+      x: move.x,
+      y: move.y,
+      transition: {
+        x: { duration: move.duration, times: move.times, ease: "linear" },
+        y: { duration: move.duration, times: move.times, ease: "linear" },
+      },
+    });
+    // Fires only when the shuffle seq changes - not on the seat/cubicle refs that
+    // churn on every snapshot - so a walk can't be restarted mid-stride.
+  }, [migration?.seq]);
 
   // On removal/replacement the body gets up, steps out through the cubicle's open
   // bottom, and strolls the aisles to the grid edge before fading. Deterministic
@@ -148,65 +223,72 @@ export function Worker({
       onPointerDown={(e) => e.stopPropagation()}
       onClick={() => onSelect(worker)}
     >
-      {/* Idle bob: CSS-driven (compositor) instead of a per-worker JS loop, and
-          skipped when zoomed too far out to see it. Only the person bobs. */}
-      <g
-        className={animate ? styles.bob : undefined}
-        style={animate ? ({ "--bob-dur": `${bobDuration}s` } as CSSProperties) : undefined}
-      >
-        <motion.g animate={sprite}>
-          {/* trending glow (behind the body) */}
-          {worker.trending && (
-            <>
-              <circle cx={0} cy={-2} r={26} fill={color} opacity={0.16} />
-              <circle cx={0} cy={-2} r={19} fill={color} opacity={0.12} />
-            </>
-          )}
+      {/* Aisle-travel offset group. At rest at (0,0) - dead on the seat. Starts at
+          a hallway edge on the initial-load walk-in (enterInitial), and is snapped
+          to the old-desk offset on a shuffle migration; either way it animates back
+          to (0,0). Kept separate so the outer group's enter/exit (incl. the
+          walk-out) is undisturbed. */}
+      <motion.g initial={enterInitial} animate={offsetCtl}>
+        {/* Idle bob: CSS-driven (compositor) instead of a per-worker JS loop, and
+            skipped when zoomed too far out to see it. Only the person bobs. */}
+        <g
+          className={animate ? styles.bob : undefined}
+          style={animate ? ({ "--bob-dur": `${bobDuration}s` } as CSSProperties) : undefined}
+        >
+          <motion.g animate={sprite}>
+            {/* trending glow (behind the body) */}
+            {worker.trending && (
+              <>
+                <circle cx={0} cy={-2} r={26} fill={color} opacity={0.16} />
+                <circle cx={0} cy={-2} r={19} fill={color} opacity={0.12} />
+              </>
+            )}
 
-          <WorkerBody appearance={appearance} shirtColor={color} />
+            <WorkerBody appearance={appearance} shirtColor={color} />
 
-          {/* trending star */}
-          {worker.trending && (
-            <path
-              d="M0,-24 L2.2,-19 L7.5,-18.5 L3.5,-15 L4.8,-9.8 L0,-12.7 L-4.8,-9.8 L-3.5,-15 L-7.5,-18.5 L-2.2,-19 Z"
-              fill="var(--accent)"
-              stroke="#1d2028"
-              strokeWidth={0.6}
-            />
-          )}
-
-          {/* removed marker */}
-          {worker.removed && (
-            <>
-              <rect x={-26} y={-20} width={52} height={44} fill="rgba(210,58,58,0.28)" />
+            {/* trending star */}
+            {worker.trending && (
               <path
-                d="M -8 -14 L 8 2 M 8 -14 L -8 2"
-                stroke="var(--removed)"
-                strokeWidth={3}
-                strokeLinecap="round"
+                d="M0,-24 L2.2,-19 L7.5,-18.5 L3.5,-15 L4.8,-9.8 L0,-12.7 L-4.8,-9.8 L-3.5,-15 L-7.5,-18.5 L-2.2,-19 Z"
+                fill="var(--accent)"
+                stroke="#1d2028"
+                strokeWidth={0.6}
               />
-            </>
-          )}
+            )}
 
-          {/* score readout */}
-          <text
-            className="pixel-font"
-            x={0}
-            y={30}
-            fontSize={7}
-            fill="var(--ink-dim)"
-            textAnchor="middle"
-          >
-            {formatScore(worker.score)}
-          </text>
+            {/* removed marker */}
+            {worker.removed && (
+              <>
+                <rect x={-26} y={-20} width={52} height={44} fill="rgba(210,58,58,0.28)" />
+                <path
+                  d="M -8 -14 L 8 2 M 8 -14 L -8 2"
+                  stroke="var(--removed)"
+                  strokeWidth={3}
+                  strokeLinecap="round"
+                />
+              </>
+            )}
 
-          {/* surge FX (arrows) */}
-          <motion.g initial={{ opacity: 0, y: -6 }} animate={fx}>
-            <path d="M -6 0 L 0 -8 L 6 0 Z" fill="var(--accent)" />
-            <path d="M -6 6 L 0 -2 L 6 6 Z" fill="var(--accent-soft)" opacity={0.8} />
+            {/* score readout */}
+            <text
+              className="pixel-font"
+              x={0}
+              y={30}
+              fontSize={7}
+              fill="var(--ink-dim)"
+              textAnchor="middle"
+            >
+              {formatScore(worker.score)}
+            </text>
+
+            {/* surge FX (arrows) */}
+            <motion.g initial={{ opacity: 0, y: -6 }} animate={fx}>
+              <path d="M -6 0 L 0 -8 L 6 0 Z" fill="var(--accent)" />
+              <path d="M -6 6 L 0 -2 L 6 6 Z" fill="var(--accent-soft)" opacity={0.8} />
+            </motion.g>
           </motion.g>
-        </motion.g>
-      </g>
+        </g>
+      </motion.g>
     </motion.g>
   );
 }

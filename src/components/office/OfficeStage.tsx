@@ -11,7 +11,8 @@ import type {
 import { worldBounds } from "@/lib/data/layout";
 import { CubicleGroup } from "./CubicleGroup";
 import { Decor } from "./Decor";
-import type { Pulse } from "@/lib/office/useOffice";
+import type { LayoutMigration, Pulse } from "@/lib/office/useOffice";
+import type { Migration } from "./Worker";
 
 interface Props {
   subredditsById: Record<string, Subreddit>;
@@ -23,6 +24,12 @@ interface Props {
   ambient: boolean;
   /** Freeze all background motion (a modal is open with pause-on-modal enabled). */
   paused: boolean;
+  /** True while the office first fills (initial data load): the roster walks in
+      from the hallway edges to their cubicles rather than popping in at the desks. */
+  arriving: boolean;
+  /** Set for one shuffle relayout: the previous cubicle positions (+ seq), so each
+      worker walks from its old desk to its new one. Null when not migrating. */
+  migration: LayoutMigration | null;
   onSelectWorker: (worker: WorkerModel) => void;
 }
 
@@ -50,11 +57,26 @@ export function OfficeStage({
   viewport,
   ambient,
   paused,
+  arriving,
+  migration,
   onSelectWorker,
 }: Props) {
   // `paused` freezes all background motion while a modal is open (pause-on-modal
   // policy), so the CPU never re-blurs the viewport behind the backdrop.
   const animate = camera.zoom >= MOTION_MIN_ZOOM && !paused;
+
+  // Per-cubicle migration objects (old position + seq) for the current shuffle.
+  // Memoized on `migration` so the reference stays stable between shuffles and
+  // doesn't defeat CubicleGroup's memo; recomputed only when a shuffle sets a new
+  // migration (or clears it back to null).
+  const migrationBySub = useMemo<Record<string, Migration> | null>(() => {
+    if (!migration) return null;
+    const m: Record<string, Migration> = {};
+    for (const [id, fromPos] of Object.entries(migration.from)) {
+      m[id] = { fromPos, seq: migration.seq };
+    }
+    return m;
+  }, [migration]);
 
   // Cubicle-grid edge - departing workers walk the aisles out to this perimeter
   // and fade there, same as where the ambient hallway NPCs expire (so they stop
@@ -129,6 +151,8 @@ export function OfficeStage({
               pulses={pulses}
               bounds={bounds}
               animate={animate}
+              enter={arriving}
+              migration={migrationBySub?.[cubicle.subredditId] ?? null}
               onSelect={onSelectWorker}
             />
           );

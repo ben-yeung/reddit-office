@@ -114,8 +114,12 @@
   font-size: 0.82rem;
   cursor: pointer;
 }
-.reset:hover {
+.reset:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.1);
+}
+.reset:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 /* Authenticated-only: reopen the subreddit picker. Accent-outlined so it reads as

@@ -8,6 +8,8 @@ interface Props {
   policy: OfficePolicy;
   onChange: (next: OfficePolicy) => void;
   onReset: () => void;
+  /** A shuffle migration is animating; disable the control until it settles. */
+  shuffling: boolean;
   /**
    * Reopen the onboarding subreddit picker. Present only in authenticated mode -
    * the demo office has no picker, so the button is hidden there.
@@ -29,7 +31,7 @@ const EVENTS: Array<{ value: WorkerEventType; label: string }> = [
 ];
 
 /** The Office Policy panel: worker sourcing + per-event animation toggles (ADR-0005). */
-export function PolicyPanel({ policy, onChange, onReset, onEditSubreddits }: Props) {
+export function PolicyPanel({ policy, onChange, onReset, shuffling, onEditSubreddits }: Props) {
   const [open, setOpen] = useState(true);
 
   function setSourcing(sourcing: SourcingRule) {
@@ -158,8 +160,8 @@ export function PolicyPanel({ policy, onChange, onReset, onEditSubreddits }: Pro
             </button>
           )}
 
-          <button className={styles.reset} onClick={onReset}>
-            Shuffle office layout
+          <button className={styles.reset} onClick={onReset} disabled={shuffling}>
+            {shuffling ? "Reshuffling…" : "Shuffle office layout"}
           </button>
         </div>
       )}

@@ -5,7 +5,7 @@ import type { Pulse } from "@/lib/office/useOffice";
 import { seatPosition, type Bounds } from "@/lib/data/layout";
 import { appearanceFor } from "@/lib/worker/appearance";
 import { Cubicle } from "./Cubicle";
-import { Worker, WorkerDeskSlot } from "./Worker";
+import { Worker, WorkerDeskSlot, type Migration } from "./Worker";
 
 interface Props {
   cubicle: CubicleModel;
@@ -15,6 +15,11 @@ interface Props {
   /** Cubicle-grid perimeter a departing worker walks out to before fading. */
   bounds: Bounds;
   animate: boolean;
+  /** True while the office first fills: these workers walk in from the hallways. */
+  enter: boolean;
+  /** Set for one shuffle relayout: this cubicle's old position (+ seq), so its
+      workers walk from their old desks to the new ones. Null when not migrating. */
+  migration: Migration | null;
   onSelect: (worker: WorkerModel) => void;
 }
 
@@ -35,6 +40,8 @@ function CubicleGroupInner({
   pulses,
   bounds,
   animate,
+  enter,
+  migration,
   onSelect,
 }: Props) {
   // Precompute each worker's local seat + appearance once, shared by both layers.
@@ -51,6 +58,9 @@ function CubicleGroupInner({
   });
 
   return (
+    // The cubicle (walls, header, desks) is placed by a static transform: on a
+    // shuffle it jumps straight to its new grid cell to "show the destination",
+    // and each worker walks the aisles over to it (see Worker's migration).
     <g transform={`translate(${cubicle.position.x} ${cubicle.position.y})`}>
       <Cubicle cubicle={cubicle} subreddit={subreddit} workerCount={workers.length} />
 
@@ -83,6 +93,8 @@ function CubicleGroupInner({
             color={subreddit.color}
             pulse={pulses[worker.id]}
             animate={animate}
+            enter={enter}
+            migration={migration}
             onSelect={onSelect}
           />
         ))}
