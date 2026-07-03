@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import type {
   Camera,
   Layout,
@@ -7,6 +8,7 @@ import type {
   Worker as WorkerModel,
   WorkersByCubicle,
 } from "@/lib/domain/types";
+import { worldBounds } from "@/lib/data/layout";
 import { CubicleGroup } from "./CubicleGroup";
 import { Decor } from "./Decor";
 import type { Pulse } from "@/lib/office/useOffice";
@@ -53,6 +55,12 @@ export function OfficeStage({
   // `paused` freezes all background motion while a modal is open (pause-on-modal
   // policy), so the CPU never re-blurs the viewport behind the backdrop.
   const animate = camera.zoom >= MOTION_MIN_ZOOM && !paused;
+
+  // Cubicle-grid edge - departing workers walk the aisles out to this perimeter
+  // and fade there, same as where the ambient hallway NPCs expire (so they stop
+  // at the grid rather than overlapping the decorative structures around it).
+  // Stable per layout so it doesn't defeat the memos.
+  const bounds = useMemo(() => worldBounds(layout, 0), [layout]);
 
   function isVisible(x: number, y: number, w: number, h: number): boolean {
     const sx0 = camera.x + x * camera.zoom;
@@ -119,6 +127,7 @@ export function OfficeStage({
               subreddit={subreddit}
               workers={workers}
               pulses={pulses}
+              bounds={bounds}
               animate={animate}
               onSelect={onSelectWorker}
             />

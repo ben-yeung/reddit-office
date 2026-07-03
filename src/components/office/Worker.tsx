@@ -2,21 +2,13 @@
 
 import { useEffect, useMemo, type CSSProperties } from "react";
 import { motion, useAnimationControls } from "framer-motion";
-import type { Vec2, Worker as WorkerModel } from "@/lib/domain/types";
+import type { Cubicle as CubicleModel, Vec2, Worker as WorkerModel } from "@/lib/domain/types";
+import type { Bounds } from "@/lib/data/layout";
+import type { WorkerAppearance } from "@/lib/worker/appearance";
 import type { Pulse } from "@/lib/office/useOffice";
-import { appearanceFor } from "@/lib/worker/appearance";
-import { WorkerSprite } from "./WorkerSprite";
+import { walkOut } from "@/lib/office/walkout";
+import { WorkerDesk, WorkerBody } from "./WorkerSprite";
 import styles from "./Worker.module.css";
-
-interface Props {
-  worker: WorkerModel;
-  seat: Vec2; // cubicle-local seat center
-  color: string;
-  pulse?: Pulse;
-  /** Whether idle motion runs. Gated off when zoomed too far out to perceive it. */
-  animate: boolean;
-  onSelect: (worker: WorkerModel) => void;
-}
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
@@ -27,15 +19,104 @@ function formatScore(n: number): string {
 }
 
 /**
- * A post rendered as a procedurally-varied top-down office worker. Appearance is
- * seeded from the post id (WorkerSprite); this layer adds behavior: trending glow,
- * momentum-driven bob speed, one-shot Actions (surge pop, trending wobble) from
- * event pulses, and enter/exit animations for new-post arrival and removal.
+ * The desk fixture for one seat. Rendered in a layer behind all worker bodies
+ * (see CubicleGroup), so a newly-seated worker's body is never occluded by this
+ * desk or by a departing neighbour's. Keyed by post id: on a swap the incoming
+ * occupant's desk fades in over the outgoing one at the same seat, and the desk
+ * never translates - it stays in the cubicle when its occupant walks out.
  */
-export function Worker({ worker, seat, color, pulse, animate, onSelect }: Props) {
+export function WorkerDeskSlot({
+  seat,
+  appearance,
+  color,
+  worker,
+  onSelect,
+}: {
+  seat: Vec2;
+  appearance: WorkerAppearance;
+  color: string;
+  worker: WorkerModel;
+  onSelect: (worker: WorkerModel) => void;
+}) {
+  return (
+    <motion.g
+      style={{ cursor: "pointer" }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      // Hold through the occupant's walk-out, then fade (masked on a swap by the
+      // replacement's desk already sitting at the same seat).
+      exit={{ opacity: 0, transition: { duration: 0.5, delay: 0.7 } }}
+      transition={{ duration: 0.4 }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={() => onSelect(worker)}
+    >
+      <g transform={`translate(${seat.x} ${seat.y})`}>
+        <WorkerDesk appearance={appearance} shirtColor={color} />
+      </g>
+    </motion.g>
+  );
+}
+
+interface Props {
+  worker: WorkerModel;
+  seat: Vec2; // cubicle-local seat center
+  cubicle: CubicleModel;
+  /** Cubicle-grid perimeter a departing worker walks out to before fading. */
+  bounds: Bounds;
+  appearance: WorkerAppearance;
+  color: string;
+  pulse?: Pulse;
+  /** Whether idle motion runs. Gated off when zoomed too far out to perceive it. */
+  animate: boolean;
+  onSelect: (worker: WorkerModel) => void;
+}
+
+/**
+ * The person half of a post-as-worker: fades in on the seat (sitting down at the
+ * desk fixture behind it) and, on replacement, walks the aisles out to the grid
+ * edge before fading. This layer also adds behavior - trending glow, momentum-
+ * driven bob speed, and one-shot Actions (surge pop, trending wobble) from event
+ * pulses. The desk is a separate layer (WorkerDeskSlot) and stays put.
+ */
+export function Worker({
+  worker,
+  seat,
+  cubicle,
+  bounds,
+  appearance,
+  color,
+  pulse,
+  animate,
+  onSelect,
+}: Props) {
   const sprite = useAnimationControls();
   const fx = useAnimationControls();
-  const appearance = useMemo(() => appearanceFor(worker.id), [worker.id]);
+
+  // On removal/replacement the body gets up, steps out through the cubicle's open
+  // bottom, and strolls the aisles to the grid edge before fading. Deterministic
+  // per id so it's stable across the exit's re-renders. When motion is culled
+  // (zoomed out) it just fades in place.
+  const exit = useMemo(() => {
+    if (!animate) return { opacity: 0, transition: { duration: 0.3 } };
+    const walk = walkOut(worker.id, seat, cubicle, bounds);
+    // Per-track transitions: a linear, even pace along the path (no easing pause
+    // at each corner) with a continuous fade over the final stretch - matching
+    // the ambient hallway NPCs' enter/exit feel.
+    return {
+      x: walk.x,
+      y: walk.y,
+      opacity: walk.opacity,
+      transition: {
+        x: { duration: walk.duration, times: walk.times, ease: "linear" as const },
+        y: { duration: walk.duration, times: walk.times, ease: "linear" as const },
+        opacity: {
+          duration: walk.duration,
+          times: walk.opacityTimes,
+          ease: "linear" as const,
+        },
+      },
+    };
+  }, [animate, worker.id, seat, cubicle, bounds]);
 
   useEffect(() => {
     if (!pulse) return;
@@ -60,26 +141,21 @@ export function Worker({ worker, seat, color, pulse, animate, onSelect }: Props)
   return (
     <motion.g
       style={{ cursor: "pointer" }}
-      initial={{ opacity: 0, scale: 0.4, x: seat.x, y: seat.y - 34 }}
-      animate={{ opacity: 1, scale: 1, x: seat.x, y: seat.y }}
-      exit={{
-        opacity: 0,
-        scale: worker.removed ? 0.2 : 0.5,
-        y: seat.y + 22,
-        rotate: worker.removed ? 18 : 0,
-      }}
-      transition={{ type: "spring", stiffness: 260, damping: 22 }}
+      initial={{ opacity: 0, x: seat.x, y: seat.y }}
+      animate={{ opacity: 1, x: seat.x, y: seat.y }}
+      exit={exit}
+      transition={{ duration: 0.4, ease: "easeOut" }}
       onPointerDown={(e) => e.stopPropagation()}
       onClick={() => onSelect(worker)}
     >
       {/* Idle bob: CSS-driven (compositor) instead of a per-worker JS loop, and
-          skipped entirely when zoomed too far out to see it. */}
+          skipped when zoomed too far out to see it. Only the person bobs. */}
       <g
         className={animate ? styles.bob : undefined}
         style={animate ? ({ "--bob-dur": `${bobDuration}s` } as CSSProperties) : undefined}
       >
         <motion.g animate={sprite}>
-          {/* trending glow (behind the sprite) */}
+          {/* trending glow (behind the body) */}
           {worker.trending && (
             <>
               <circle cx={0} cy={-2} r={26} fill={color} opacity={0.16} />
@@ -87,7 +163,7 @@ export function Worker({ worker, seat, color, pulse, animate, onSelect }: Props)
             </>
           )}
 
-          <WorkerSprite appearance={appearance} shirtColor={color} />
+          <WorkerBody appearance={appearance} shirtColor={color} />
 
           {/* trending star */}
           {worker.trending && (
