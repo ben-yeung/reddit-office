@@ -2,15 +2,20 @@
 
 import { useEffect, useMemo, type CSSProperties } from "react";
 import { motion, useAnimationControls } from "framer-motion";
-import type { Vec2, Worker as WorkerModel } from "@/lib/domain/types";
+import type { Cubicle as CubicleModel, Vec2, Worker as WorkerModel } from "@/lib/domain/types";
+import type { Bounds } from "@/lib/data/layout";
 import type { Pulse } from "@/lib/office/useOffice";
 import { appearanceFor } from "@/lib/worker/appearance";
+import { walkOut } from "@/lib/office/walkout";
 import { WorkerSprite } from "./WorkerSprite";
 import styles from "./Worker.module.css";
 
 interface Props {
   worker: WorkerModel;
   seat: Vec2; // cubicle-local seat center
+  cubicle: CubicleModel;
+  /** Office perimeter a departing worker walks out to before fading. */
+  bounds: Bounds;
   color: string;
   pulse?: Pulse;
   /** Whether idle motion runs. Gated off when zoomed too far out to perceive it. */
@@ -32,10 +37,27 @@ function formatScore(n: number): string {
  * momentum-driven bob speed, one-shot Actions (surge pop, trending wobble) from
  * event pulses, and enter/exit animations for new-post arrival and removal.
  */
-export function Worker({ worker, seat, color, pulse, animate, onSelect }: Props) {
+export function Worker({ worker, seat, cubicle, bounds, color, pulse, animate, onSelect }: Props) {
   const sprite = useAnimationControls();
   const fx = useAnimationControls();
   const appearance = useMemo(() => appearanceFor(worker.id), [worker.id]);
+
+  // Departure path: on removal/replacement the worker gets up, steps out through
+  // the cubicle's open bottom, and strolls to a random office edge before fading.
+  // Deterministic per id so it's stable across the exit's re-renders. Skipped
+  // when motion is culled (zoomed out) - there it just fades in place.
+  const exit = useMemo(() => {
+    if (!animate) return { opacity: 0, transition: { duration: 0.3 } };
+    const walk = walkOut(worker.id, seat, cubicle, bounds);
+    return {
+      opacity: walk.opacity,
+      x: walk.x,
+      y: walk.y,
+      scale: 1,
+      rotate: 0,
+      transition: { duration: walk.duration, times: walk.times, ease: "easeInOut" as const },
+    };
+  }, [animate, worker.id, seat, cubicle, bounds]);
 
   useEffect(() => {
     if (!pulse) return;
@@ -60,14 +82,9 @@ export function Worker({ worker, seat, color, pulse, animate, onSelect }: Props)
   return (
     <motion.g
       style={{ cursor: "pointer" }}
-      initial={{ opacity: 0, scale: 0.4, x: seat.x, y: seat.y - 34 }}
+      initial={{ opacity: 0, scale: 1, x: seat.x, y: seat.y }}
       animate={{ opacity: 1, scale: 1, x: seat.x, y: seat.y }}
-      exit={{
-        opacity: 0,
-        scale: worker.removed ? 0.2 : 0.5,
-        y: seat.y + 22,
-        rotate: worker.removed ? 18 : 0,
-      }}
+      exit={exit}
       transition={{ type: "spring", stiffness: 260, damping: 22 }}
       onPointerDown={(e) => e.stopPropagation()}
       onClick={() => onSelect(worker)}

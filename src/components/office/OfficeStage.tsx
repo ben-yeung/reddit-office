@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import type {
   Camera,
   Layout,
@@ -7,6 +8,7 @@ import type {
   Worker as WorkerModel,
   WorkersByCubicle,
 } from "@/lib/domain/types";
+import { officeExtent } from "@/lib/office/decor";
 import { CubicleGroup } from "./CubicleGroup";
 import { Decor } from "./Decor";
 import type { Pulse } from "@/lib/office/useOffice";
@@ -48,6 +50,10 @@ export function OfficeStage({
   onSelectWorker,
 }: Props) {
   const animate = camera.zoom >= MOTION_MIN_ZOOM;
+
+  // Full office extent - departing workers walk out to a random point on this
+  // perimeter before fading. Stable per layout so it doesn't defeat the memos.
+  const bounds = useMemo(() => officeExtent(layout), [layout]);
 
   function isVisible(x: number, y: number, w: number, h: number): boolean {
     const sx0 = camera.x + x * camera.zoom;
@@ -113,6 +119,7 @@ export function OfficeStage({
               subreddit={subreddit}
               workers={workers}
               pulses={pulses}
+              bounds={bounds}
               animate={animate}
               onSelect={onSelectWorker}
             />

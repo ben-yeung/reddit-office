@@ -6,7 +6,7 @@ import type {
   Worker as WorkerModel,
 } from "@/lib/domain/types";
 import type { Pulse } from "@/lib/office/useOffice";
-import { seatPosition } from "@/lib/data/layout";
+import { seatPosition, type Bounds } from "@/lib/data/layout";
 import { Cubicle } from "./Cubicle";
 import { Worker } from "./Worker";
 
@@ -15,6 +15,8 @@ interface Props {
   subreddit: Subreddit;
   workers: WorkerModel[];
   pulses: Record<string, Pulse>;
+  /** Office perimeter a departing worker walks out to before fading. */
+  bounds: Bounds;
   animate: boolean;
   onSelect: (worker: WorkerModel) => void;
 }
@@ -29,7 +31,15 @@ interface Props {
  * worker trees on every frame. Props change (and this re-renders) only on a data
  * snapshot, an event pulse, or crossing the motion-cull zoom threshold.
  */
-function CubicleGroupInner({ cubicle, subreddit, workers, pulses, animate, onSelect }: Props) {
+function CubicleGroupInner({
+  cubicle,
+  subreddit,
+  workers,
+  pulses,
+  bounds,
+  animate,
+  onSelect,
+}: Props) {
   return (
     <g transform={`translate(${cubicle.position.x} ${cubicle.position.y})`}>
       <Cubicle cubicle={cubicle} subreddit={subreddit} workerCount={workers.length} />
@@ -45,6 +55,8 @@ function CubicleGroupInner({ cubicle, subreddit, workers, pulses, animate, onSel
               key={worker.id}
               worker={worker}
               seat={seat}
+              cubicle={cubicle}
+              bounds={bounds}
               color={subreddit.color}
               pulse={pulses[worker.id]}
               animate={animate}
