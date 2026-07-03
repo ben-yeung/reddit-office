@@ -8,7 +8,9 @@ Trending posts scored by **Momentum** are represented as **Workers** inside the 
 
 Workers animate Reddit **Events** - a new post walks in, a worker glows as it surges in upvotes, a worker is escorted out when its post is removed.
 
-Clicking on workers opens a modal displaying the Reddit post content, comments, and outlinks to the post itself on Reddit.
+Clicking on workers opens a Reddit-style modal with the post content and media, its subreddit's community icon, real comments, an interactive **Momentum** tag that explains the score, and an "Open in Reddit" link.
+
+Between the cubicles the floor is alive: staffed meeting rooms with a chat and a screen, a working café at the coffee station, and ambient staff moving along the hallways.
 
 It runs as a single Next.js app: a thin backend does the Reddit OAuth token exchange and proxies the API, while the client owns polling, roster state, and rendering.
 
@@ -23,6 +25,47 @@ It runs as a single Next.js app: a thin backend does the Reddit OAuth token exch
 Pan/zoom camera over an SVG office. Click a worker for a modal with the post and an "Open in Reddit" link - the app is read-only upon OAuth.
 
 Full design and decision records live in `docs/PRD.md`, `docs/glossary.md`, and `docs/adr/`.
+
+## Momentum & post selection
+
+Not every post gets a desk.
+Each cubicle shows only a handful of workers, selected based on momentum.
+
+### What Momentum measures
+
+Momentum is a single number that answers "how fast is this post moving _for its subreddit_, right now?"
+
+It is built from a post's **velocity** - its rate of change between two polls, expressed per minute - across two signals:
+
+- **upvote pace** - how fast the score is climbing
+- **comment pace** - how fast comments are arriving
+
+Those two rates are combined with fixed weights (`DEFAULT_WEIGHTS` in `src/lib/momentum/momentum.ts`), currently **70% upvote pace + 30% comment pace**.
+
+The key move is **per-subreddit normalization**.
+
+Each subreddit keeps a rolling **baseline** of its own "normal" pace where a post's momentum is its velocity _divided by that baseline_.
+
+The result is a comparable multiplier, regardless of subreddit size:
+
+| Momentum | Reading | Meaning                                                             |
+| -------- | ------- | ------------------------------------------------------------------- |
+| `~1.0×`  | Steady  | Moving at the subreddit's normal pace                               |
+| `< 0.7×` | Cooling | Losing traction (eligible for pruning)                              |
+| `≥ 2.2×` | Surging | A genuine upvote surge (`SURGE_MOMENTUM`) - triggers the glow event |
+
+These same thresholds power the interactive Momentum tag in the post modal, which shows the post's standing on a `0..3×` gauge and explains the weighting.
+
+### How the Roster picks who to seat
+
+Every tick, each cubicle re-selects its workers via `selectRoster` (`src/lib/roster/roster.ts`) from the subreddit's candidate posts.
+The bounded roster (`ROSTER_MAX`, currently 6) is filled in two passes:
+
+1. **Grace period first.** Any post newer than `GRACE_MS` (20s) is guaranteed a slot, newest first, so a fresh post gets a chance to prove traction before momentum has any history on it.
+2. **Then by sourcing rule.** The remaining slots go to candidates that clear a minimum momentum floor (`MIN_MOMENTUM`, 0.35), ranked according to the current **Office Policy** sourcing rule:
+   - **New** - strictly by recency.
+   - **Momentum** - strictly by the normalized score above.
+   - **Blend** (default) - alternates between momentum and recency picks, deduped, so a cubicle mixes what's hot with what's fresh.
 
 ## Tech stack
 
