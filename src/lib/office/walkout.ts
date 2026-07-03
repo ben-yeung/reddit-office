@@ -10,19 +10,26 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 export const WALKOUT_MIN_S = 1.8;
 export const WALKOUT_MAX_S = 4.5;
 
+/** Fraction of the walk after which the worker starts fading out (fades over the
+ *  final stretch as it reaches the edge, like the ambient hallway NPCs). */
+const FADE_START = 0.82;
+
 /**
  * A departing worker's exit walk, as framer-motion keyframes in the cubicle's
  * local space (the worker group is translated to `cubicle.position`).
  *
- * `x`/`y`/`opacity` are aligned keyframe tracks sampled at `times`; the worker
- * holds full opacity until a short tail at the end, so it fades only once it has
- * reached the office edge.
+ * `x`/`y` are position keyframes sampled at `times` (distance-proportional, so a
+ * constant/linear pace gives even speed through every corridor). `opacity` is a
+ * separate track on `opacityTimes` - held full, then a single smooth fade over
+ * the final stretch - so the fade is continuous rather than stepping at each
+ * path waypoint.
  */
 export interface WalkOut {
   x: number[];
   y: number[];
-  opacity: number[];
   times: number[];
+  opacity: number[];
+  opacityTimes: number[];
   duration: number;
 }
 
@@ -87,16 +94,9 @@ export function walkOut(id: string, seat: Vec2, cubicle: Cubicle, bounds: Bounds
     pts.push({ x: vertAisleX, y: edge === "top" ? bounds.minY : bounds.maxY });
   }
 
-  // Split the final leg so the fade is a short, consistent tail rather than
-  // spanning a whole long corridor.
-  const last = pts[pts.length - 1];
-  const prev = pts[pts.length - 2];
-  pts.splice(pts.length - 1, 0, {
-    x: prev.x + (last.x - prev.x) * 0.8,
-    y: prev.y + (last.y - prev.y) * 0.8,
-  });
-
-  // To cubicle-local space, with times proportional to distance (steady pace).
+  // To cubicle-local space, with times proportional to distance so a linear ease
+  // yields an even walking pace through every segment (no easing pauses at the
+  // corners). Opacity is a separate track - full, then one smooth fade at the end.
   const x = pts.map((p) => p.x - pos.x);
   const y = pts.map((p) => p.y - pos.y);
   const cumulative = [0];
@@ -107,7 +107,13 @@ export function walkOut(id: string, seat: Vec2, cubicle: Cubicle, bounds: Bounds
   }
   const total = cumulative[cumulative.length - 1] || 1;
   const times = cumulative.map((d) => d / total);
-  const opacity = pts.map((_, i) => (i === pts.length - 1 ? 0 : 1));
 
-  return { x, y, opacity, times, duration: clamp(total / 220, WALKOUT_MIN_S, WALKOUT_MAX_S) };
+  return {
+    x,
+    y,
+    times,
+    opacity: [1, 1, 0],
+    opacityTimes: [0, FADE_START, 1],
+    duration: clamp(total / 220, WALKOUT_MIN_S, WALKOUT_MAX_S),
+  };
 }

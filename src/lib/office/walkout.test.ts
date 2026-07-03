@@ -24,7 +24,10 @@ const SEAT: Vec2 = { x: 100, y: 90 }; // cubicle-local
 
 /** Final keyframe converted back to world space. */
 function endWorld(w: ReturnType<typeof walkOut>): Vec2 {
-  return { x: w.x[w.x.length - 1] + CUBICLE.position.x, y: w.y[w.y.length - 1] + CUBICLE.position.y };
+  return {
+    x: w.x[w.x.length - 1] + CUBICLE.position.x,
+    y: w.y[w.y.length - 1] + CUBICLE.position.y,
+  };
 }
 
 describe("walkOut", () => {
@@ -68,15 +71,28 @@ describe("walkOut", () => {
 
   it("keeps aligned keyframe tracks and a sane clamped duration", () => {
     const w = walkOut("t3_abc", SEAT, CUBICLE, BOUNDS);
+    // position tracks share the distance-proportional `times` grid
     expect(w.x).toHaveLength(w.times.length);
     expect(w.y).toHaveLength(w.times.length);
-    expect(w.opacity).toHaveLength(w.times.length);
     expect(w.times[0]).toBe(0);
     expect(w.times[w.times.length - 1]).toBeCloseTo(1, 6);
     // times strictly increasing (framer requires it)
     for (let i = 1; i < w.times.length; i++) expect(w.times[i]).toBeGreaterThan(w.times[i - 1]);
     expect(w.duration).toBeGreaterThanOrEqual(1.8);
     expect(w.duration).toBeLessThanOrEqual(4.5);
+  });
+
+  it("fades on its own continuous track: held full, then a single smooth fade", () => {
+    const w = walkOut("t3_abc", SEAT, CUBICLE, BOUNDS);
+    // opacity has its own times, decoupled from the path waypoints
+    expect(w.opacity).toHaveLength(w.opacityTimes.length);
+    expect(w.opacity).toEqual([1, 1, 0]); // full, still full, gone - one fade
+    expect(w.opacityTimes[0]).toBe(0);
+    expect(w.opacityTimes[w.opacityTimes.length - 1]).toBe(1);
+    for (let i = 1; i < w.opacityTimes.length; i++)
+      expect(w.opacityTimes[i]).toBeGreaterThan(w.opacityTimes[i - 1]);
+    // holds most of the walk before the fade begins
+    expect(w.opacityTimes[1]).toBeGreaterThan(0.5);
   });
 
   it("is deterministic per post id", () => {

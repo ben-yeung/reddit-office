@@ -99,11 +99,22 @@ export function Worker({
   const exit = useMemo(() => {
     if (!animate) return { opacity: 0, transition: { duration: 0.3 } };
     const walk = walkOut(worker.id, seat, cubicle, bounds);
+    // Per-track transitions: a linear, even pace along the path (no easing pause
+    // at each corner) with a continuous fade over the final stretch - matching
+    // the ambient hallway NPCs' enter/exit feel.
     return {
-      opacity: walk.opacity,
       x: walk.x,
       y: walk.y,
-      transition: { duration: walk.duration, times: walk.times, ease: "easeInOut" as const },
+      opacity: walk.opacity,
+      transition: {
+        x: { duration: walk.duration, times: walk.times, ease: "linear" as const },
+        y: { duration: walk.duration, times: walk.times, ease: "linear" as const },
+        opacity: {
+          duration: walk.duration,
+          times: walk.opacityTimes,
+          ease: "linear" as const,
+        },
+      },
     };
   }, [animate, worker.id, seat, cubicle, bounds]);
 
