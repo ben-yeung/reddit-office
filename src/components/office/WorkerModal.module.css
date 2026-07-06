@@ -56,14 +56,16 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding-right: 36px;
 }
-/* Momentum tag pinned to the top-right of the post area: pushed to the header's
-   right end and aligned to its top edge, clear of the author line and (on the
-   stacked layout) the close button. */
+/* Momentum tag pinned to the right of the post header: pushed to the header's
+   right end and sized to the header's two-row height so it matches the density of
+   the avatar + title block. Its right edge lines up with the post media and the
+   Open-in-Reddit button (all at the post column's content edge); the close button
+   sits over the comments pane in the wide layout, so no clearance is needed there
+   - only in the stacked layout below. */
 .momentumSlot {
   margin-left: auto;
-  align-self: flex-start;
+  align-self: center;
 }
 /* Community icon links out to the sub on reddit.com. */
 .avatarLink {
@@ -676,6 +678,11 @@
   }
   .main {
     flex: 1 1 auto;
+  }
+  /* Stacked: the close button now sits over the post column's top-right, so keep
+     the header (and the momentum tag) clear of it. */
+  .head {
+    padding-right: 36px;
   }
   /* Stacked: the pane needs a definite height for its absolutely-filled inner. */
   .commentsPane {

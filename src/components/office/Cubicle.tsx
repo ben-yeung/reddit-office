@@ -26,8 +26,8 @@ interface Props {
 /**
  * A subreddit's cubicle, drawn top-down (bird's-eye): fabric partition walls, a
  * nameplate, a floor rug, sticky notes, and corner-resize brackets that reveal on
- * hover (the affordance for the planned drag-to-resize; ADR-0007). Workers bring
- * their own desks, so the cubicle stays clear inside.
+ * hover (the affordance for the planned drag-to-resize; ADR-0007). The desks are
+ * fixed seat furniture drawn by CubicleGroup, so the cubicle frame stays clear.
  */
 export function Cubicle({ cubicle, subreddit, workerCount }: Props) {
   const { w, h } = cubicle.size;

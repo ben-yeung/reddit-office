@@ -10,7 +10,15 @@ import type {
   WorkerEvent,
   WorkersByCubicle,
 } from "@/lib/domain/types";
-import { ROSTER_MAX, GRACE_MS, MIN_MOMENTUM, TICK_MS } from "@/lib/domain/constants";
+import {
+  ROSTER_MAX,
+  NEW_WINDOW_MS,
+  MIN_MOMENTUM,
+  RISING_MOMENTUM,
+  BLEND_FRESH,
+  SEAT_HYSTERESIS,
+  TICK_MS,
+} from "@/lib/domain/constants";
 import {
   type Baseline,
   initBaseline,
@@ -234,7 +242,13 @@ export class MockDataSource implements DataSource {
   }
 
   setPolicy(policy: OfficePolicy): void {
+    const sourcingChanged = policy.sourcing !== this.policy.sourcing;
     this.policy = policy;
+    // Repopulate the cubicles under the new sourcing rule immediately (no events),
+    // so switching "Workers are…" takes effect without waiting for the next tick.
+    if (sourcingChanged && this.handlers) {
+      this.handlers.onSnapshot(this.buildSnapshot(Date.now()).snapshot);
+    }
   }
 
   start(handlers: DataSourceHandlers): void {
@@ -270,9 +284,9 @@ export class MockDataSource implements DataSource {
       };
       const initial = intRange(this.rng, 5, 9);
       for (let i = 0; i < initial; i++) {
-        // Stagger creation into the past so seeded posts are outside the grace
-        // window (they are not treated as brand-new arrivals).
-        const age = intRange(this.rng, GRACE_MS + 5_000, 45 * 60_000);
+        // Stagger creation across the past so the seeded office has a mix of posts
+        // inside and outside the New window (some fresh, some older).
+        const age = intRange(this.rng, 30_000, 18 * 60 * 60_000);
         this.spawnPost(sim, now - age, false);
       }
       this.subs.set(sub.id, sim);
@@ -442,12 +456,18 @@ export class MockDataSource implements DataSource {
       const selectedIds = selectRoster(
         candidates,
         this.policy.sourcing,
-        { maxSize: ROSTER_MAX, graceMs: GRACE_MS, minMomentum: MIN_MOMENTUM },
+        {
+          maxSize: ROSTER_MAX,
+          newWindowMs: NEW_WINDOW_MS,
+          minMomentum: MIN_MOMENTUM,
+          risingMomentum: RISING_MOMENTUM,
+          freshSeats: BLEND_FRESH,
+        },
         now,
       ).map((c) => c.id);
 
       const prevSeats = sim.seats;
-      sim.seats = assignSeats(selectedIds, prevSeats, ROSTER_MAX);
+      sim.seats = assignSeats(selectedIds, prevSeats, ROSTER_MAX, SEAT_HYSTERESIS);
 
       const workers: Worker[] = selectedIds.map((id) =>
         this.toWorker(sim.posts.get(id)!, sim.seats[id]),

@@ -1,22 +1,54 @@
 import { describe, it, expect } from "vitest";
 import { selectRoster, assignSeats, type RosterCandidate, type RosterConfig } from "./roster";
 
-const CFG: RosterConfig = { maxSize: 3, graceMs: 20_000, minMomentum: 0.35 };
-const NOW = 1_000_000;
-const OLD = NOW - 60_000; // outside the grace window
+const NOW = 10_000_000;
+const HOUR = 3_600_000;
 
-function c(id: string, momentum: number, createdAt = OLD): RosterCandidate {
-  return { id, momentum, createdAt };
+const CFG: RosterConfig = {
+  maxSize: 6,
+  newWindowMs: 3 * HOUR,
+  minMomentum: 0.35,
+  risingMomentum: 1.0,
+  freshSeats: 4,
+};
+
+/** A candidate `ageMs` old (default: outside the New window). */
+function c(id: string, momentum: number, ageMs = 6 * HOUR): RosterCandidate {
+  return { id, momentum, createdAt: NOW - ageMs };
 }
 
-describe("selectRoster - momentum sourcing", () => {
-  it("takes the highest-momentum candidates up to maxSize", () => {
+describe("selectRoster - new sourcing", () => {
+  it("keeps only posts within the window, newest first", () => {
     const picked = selectRoster(
-      [c("a", 5), c("b", 1), c("c", 9), c("d", 3), c("e", 0.2)],
-      "momentum",
+      [
+        c("old", 9, 4 * HOUR), // outside the window
+        c("older", 9, 5 * HOUR), // outside the window
+        c("recent", 0.1, 10 * 60_000),
+        c("mid", 0.1, 90 * 60_000),
+      ],
+      "new",
       CFG,
       NOW,
     );
+    // Momentum is irrelevant to New; only recency inside the window matters.
+    expect(picked.map((p) => p.id)).toEqual(["recent", "mid"]);
+  });
+
+  it("shows fewer when little is fresh, rather than backfilling old posts", () => {
+    const picked = selectRoster([c("a", 9, 5 * HOUR), c("b", 8, 4 * HOUR)], "new", CFG, NOW);
+    expect(picked).toHaveLength(0);
+  });
+});
+
+describe("selectRoster - momentum sourcing", () => {
+  it("takes the highest-momentum candidates up to maxSize, strictly", () => {
+    const picked = selectRoster(
+      [c("a", 5), c("b", 1), c("c", 9), c("d", 3), c("fresh", 0.2, 60_000)],
+      "momentum",
+      { ...CFG, maxSize: 3 },
+      NOW,
+    );
+    // A brand-new post with low momentum earns no grace here - strictly momentum.
     expect(picked.map((p) => p.id)).toEqual(["c", "a", "d"]);
   });
 
@@ -26,76 +58,85 @@ describe("selectRoster - momentum sourcing", () => {
   });
 });
 
-describe("selectRoster - new sourcing", () => {
-  it("takes the newest candidates", () => {
+describe("selectRoster - blended sourcing", () => {
+  it("seats momentum leaders first, then new-and-surging posts", () => {
     const picked = selectRoster(
       [
-        c("old", 9, NOW - 50_000),
-        c("mid", 9, NOW - 40_000),
-        c("recent", 0.5, NOW - 30_000),
-      ],
-      "new",
-      CFG,
-      NOW,
-    );
-    expect(picked.map((p) => p.id)).toEqual(["recent", "mid", "old"]);
-  });
-});
-
-describe("selectRoster - grace period", () => {
-  it("guarantees a slot to brand-new posts even with low momentum", () => {
-    const picked = selectRoster(
-      [c("hot1", 9), c("hot2", 8), c("hot3", 7), c("fresh", 0.01, NOW - 1_000)],
-      "momentum",
-      CFG,
-      NOW,
-    );
-    // fresh is in grace -> guaranteed; only 2 remaining slots for the hot ones.
-    expect(picked.map((p) => p.id)).toContain("fresh");
-    expect(picked).toHaveLength(3);
-    expect(picked.map((p) => p.id)).toEqual(expect.arrayContaining(["fresh", "hot1", "hot2"]));
-    expect(picked.map((p) => p.id)).not.toContain("hot3");
-  });
-});
-
-describe("selectRoster - blend sourcing", () => {
-  it("mixes high-momentum and newest candidates", () => {
-    const picked = selectRoster(
-      [
-        c("momKing", 100, OLD),
-        c("momMid", 50, OLD),
-        c("newest", 0.4, NOW - 25_000),
-        c("newish", 0.4, NOW - 26_000),
+        c("m1", 9), // old, high momentum -> leader
+        c("m2", 8),
+        c("m3", 7),
+        c("f1", 2, 10 * 60_000), // fresh + rising
+        c("f2", 1.5, 20 * 60_000),
+        c("f3", 1.2, 30 * 60_000),
+        c("f4", 1.1, 40 * 60_000),
+        c("f5", 1.05, 50 * 60_000),
       ],
       "blend",
-      { ...CFG, maxSize: 2 },
+      CFG, // maxSize 6, freshSeats 4 -> 2 leaders + 4 fresh
       NOW,
     );
-    // one from momentum, one from recency
-    expect(picked.map((p) => p.id)).toEqual(expect.arrayContaining(["momKing", "newest"]));
+    expect(picked.map((p) => p.id)).toEqual(["m1", "m2", "f1", "f2", "f3", "f4"]);
+  });
+
+  it("backfills from momentum when few posts are fresh-and-surging", () => {
+    const picked = selectRoster(
+      [c("m1", 9), c("m2", 8), c("m3", 7), c("m4", 6), c("m5", 5), c("f1", 2, 10 * 60_000)],
+      "blend",
+      CFG,
+      NOW,
+    );
+    // 2 leaders + 1 fresh, then backfilled to 6 from the momentum pool.
+    expect(picked).toHaveLength(6);
+    expect(picked.map((p) => p.id)).toEqual(expect.arrayContaining(["m3", "m4", "m5"]));
+    expect(picked.slice(0, 3).map((p) => p.id)).toEqual(["m1", "m2", "f1"]);
+  });
+
+  it("excludes fresh posts that are not rising from the fresh half", () => {
+    const picked = selectRoster(
+      [c("m1", 9), c("m2", 8), c("calm", 0.5, 10 * 60_000)],
+      "blend",
+      CFG,
+      NOW,
+    );
+    // "calm" is fresh but below risingMomentum, so it isn't a surging pick; it also
+    // clears minMomentum, so it can still backfill after the leaders.
+    expect(picked.map((p) => p.id)).toEqual(["m1", "m2", "calm"]);
   });
 });
 
-describe("assignSeats", () => {
-  it("keeps existing workers in their seats and seats newcomers in free slots", () => {
-    const prev = { a: 0, b: 2 };
-    const next = assignSeats(["a", "b", "c"], prev, 6);
-    expect(next.a).toBe(0);
-    expect(next.b).toBe(2);
-    expect(next.c).toBe(1); // lowest free seat
+describe("assignSeats - rank-ordered with hysteresis", () => {
+  const HYST = 2;
+
+  it("seats newcomers by rank order", () => {
+    const next = assignSeats(["a", "b", "c"], {}, 6, HYST);
+    expect(next).toEqual({ a: 0, b: 1, c: 2 });
+  });
+
+  it("keeps seats stable on a small rank change (no twitch)", () => {
+    // a and b swap rank, but each moves only one position - within hysteresis.
+    const next = assignSeats(["b", "a", "c"], { a: 0, b: 1, c: 2 }, 6, HYST);
+    expect(next).toEqual({ a: 0, b: 1, c: 2 });
+  });
+
+  it("walks a worker to a new seat on a large rank jump", () => {
+    // e vaults from rank 4 to rank 0; it can't keep seat 4, so it takes a front seat.
+    const next = assignSeats(["e", "a", "b", "c", "d"], { a: 0, b: 1, c: 2, d: 3, e: 4 }, 6, HYST);
+    expect(next.e).toBeLessThan(4);
+    // No two workers share a seat.
+    expect(new Set(Object.values(next)).size).toBe(5);
   });
 
   it("reuses a freed seat when a worker leaves", () => {
-    const prev = { a: 0, b: 1, c: 2 };
-    const next = assignSeats(["a", "c", "d"], prev, 6); // b left, freeing seat 1
+    const next = assignSeats(["a", "c", "d"], { a: 0, b: 1, c: 2 }, 6, HYST); // b left
     expect(next.a).toBe(0);
     expect(next.c).toBe(2);
-    expect(next.d).toBe(1);
+    expect(next.d).toBe(1); // the seat b vacated
   });
 
-  it("never exceeds maxSeats", () => {
-    const next = assignSeats(["a", "b", "c"], {}, 2);
+  it("never exceeds maxSeats and assigns each a distinct seat", () => {
+    const next = assignSeats(["a", "b", "c"], {}, 2, HYST);
     const seats = Object.values(next);
     expect(seats.every((s) => s < 2)).toBe(true);
+    expect(new Set(seats).size).toBe(seats.length);
   });
 });

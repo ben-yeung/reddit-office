@@ -2,18 +2,34 @@ import type { DataSource, DataSourceHandlers } from "./DataSource";
 import type {
   Layout,
   OfficePolicy,
+  StatSample,
   Subreddit,
   Worker,
   WorkerEvent,
   WorkersByCubicle,
 } from "@/lib/domain/types";
-import { ROSTER_MAX, GRACE_MS, MIN_MOMENTUM } from "@/lib/domain/constants";
+import {
+  ROSTER_MAX,
+  NEW_WINDOW_MS,
+  MIN_MOMENTUM,
+  RISING_MOMENTUM,
+  BLEND_FRESH,
+  SEAT_HYSTERESIS,
+} from "@/lib/domain/constants";
 import { selectRoster, assignSeats, type RosterCandidate } from "@/lib/roster/roster";
+import { advanceMomentum, scorePrior } from "@/lib/momentum/demoMomentum";
+import type { Baseline } from "@/lib/momentum/momentum";
 import { MockDataSource } from "./MockDataSource";
 import type { DemoOfficePayload, RedditPostDTO } from "@/lib/reddit/dto";
 
 /** How often the client re-reads the (server-shared-cached) office endpoint. */
 const POLL_MS = 30_000;
+
+/** Per-post Momentum state carried across polls (previous sample + last reading). */
+interface PostMomentum {
+  sample: StatSample;
+  momentum: number;
+}
 
 /** Fetches an office payload from the server; different modes point at different endpoints. */
 export type OfficePayloadFetcher = () => Promise<DemoOfficePayload>;
@@ -21,7 +37,12 @@ export type OfficePayloadFetcher = () => Promise<DemoOfficePayload>;
 /**
  * The live-Reddit DataSource. Polls a server office endpoint for real hot posts
  * and renders them as Workers, reusing the same roster/seat logic as the mock.
- * New-post and trending Events are derived by diffing successive snapshots.
+ *
+ * Momentum is measured, not faked: each post's stats are sampled every poll and
+ * run through the shared velocity/baseline maths (see {@link advanceMomentum}), so
+ * a stale-but-upvoted post (flat score) decays and is evicted while a post gaining
+ * upvotes fast climbs and takes a seat. New-post and trending Events are derived by
+ * diffing successive snapshots.
  *
  * The endpoint is injected as a `fetchPayload` callback, so one implementation
  * drives both modes: demo reads the shared-cached `/api/demo/office`, and the
@@ -50,6 +71,10 @@ export class PollingOfficeDataSource implements DataSource {
   private readonly seats = new Map<string, Record<string, number>>();
   private readonly prevSelection = new Map<string, Set<string>>();
   private readonly prevTop = new Map<string, string>();
+  /** Per-post Momentum state (previous sample + last reading), keyed by post id. */
+  private readonly momentumState = new Map<string, PostMomentum>();
+  /** Per-subreddit rolling velocity baseline, seeded lazily on first velocity. */
+  private readonly baselines = new Map<string, Baseline>();
 
   constructor(
     subreddits: Subreddit[],
@@ -72,8 +97,20 @@ export class PollingOfficeDataSource implements DataSource {
   }
 
   setPolicy(policy: OfficePolicy): void {
+    const sourcingChanged = policy.sourcing !== this.policy.sourcing;
     this.policy = policy;
     this.fallback?.setPolicy(policy);
+    // Repopulate the cubicles under the new sourcing rule immediately, from the
+    // posts we already have - no refetch, no waiting for the next poll. Silent so
+    // switching a rule doesn't fire a burst of new-post/trending pulses.
+    if (sourcingChanged && this.handlers && !this.fallback && this.hasPosts()) {
+      this.emit(true);
+    }
+  }
+
+  private hasPosts(): boolean {
+    for (const posts of Object.values(this.postsBySub)) if (posts.length > 0) return true;
+    return false;
   }
 
   start(handlers: DataSourceHandlers): void {
@@ -121,35 +158,55 @@ export class PollingOfficeDataSource implements DataSource {
     }
   }
 
-  /** Build a snapshot from the latest posts and emit derived events. */
-  private emit(): void {
+  /**
+   * Build a snapshot from the latest posts and emit derived events. When `silent`
+   * (a policy-driven repopulation rather than a fresh poll), the snapshot is
+   * emitted but per-event pulses are suppressed.
+   */
+  private emit(silent = false): void {
     if (!this.handlers) return;
     const now = Date.now();
     const workersByCubicle: WorkersByCubicle = {};
     const events: WorkerEvent[] = [];
+    const liveIds = new Set<string>();
 
     for (const sub of this.subreddits) {
       const posts = this.postsBySub[sub.id] ?? [];
       const maxScore = Math.max(1, ...posts.map((p) => p.score));
 
-      // Pseudo-Momentum from score, normalized within the sub so every cubicle
-      // shows variety immediately and small/large subs are comparable.
+      // Measure each post's Momentum from its change since the last poll, threading
+      // the sub's baseline through them (seeded lazily on first velocity). A
+      // first-sight post falls back to a score prior so the office is populated
+      // immediately; a stale post whose score isn't moving decays toward zero.
+      let baseline: Baseline | null = this.baselines.get(sub.id) ?? null;
       const momentumById = new Map<string, number>();
       const candidates: RosterCandidate[] = posts.map((p) => {
-        const momentum = 0.4 + 1.8 * (p.score / maxScore);
-        momentumById.set(p.id, momentum);
-        return { id: p.id, createdAt: p.createdAt, momentum };
+        liveIds.add(p.id);
+        const prev = this.momentumState.get(p.id) ?? null;
+        const curr: StatSample = { t: now, score: p.score, comments: p.comments };
+        const reading = advanceMomentum(prev, curr, baseline, scorePrior(p.score, maxScore));
+        baseline = reading.baseline;
+        this.momentumState.set(p.id, { sample: reading.sample, momentum: reading.momentum });
+        momentumById.set(p.id, reading.momentum);
+        return { id: p.id, createdAt: p.createdAt, momentum: reading.momentum };
       });
+      if (baseline) this.baselines.set(sub.id, baseline);
 
       const selectedIds = selectRoster(
         candidates,
         this.policy.sourcing,
-        { maxSize: ROSTER_MAX, graceMs: GRACE_MS, minMomentum: MIN_MOMENTUM },
+        {
+          maxSize: ROSTER_MAX,
+          newWindowMs: NEW_WINDOW_MS,
+          minMomentum: MIN_MOMENTUM,
+          risingMomentum: RISING_MOMENTUM,
+          freshSeats: BLEND_FRESH,
+        },
         now,
       ).map((c) => c.id);
 
       const prevSeats = this.seats.get(sub.id) ?? {};
-      const seats = assignSeats(selectedIds, prevSeats, ROSTER_MAX);
+      const seats = assignSeats(selectedIds, prevSeats, ROSTER_MAX, SEAT_HYSTERESIS);
       this.seats.set(sub.id, seats);
 
       const byId = new Map(posts.map((p) => [p.id, p] as const));
@@ -168,9 +225,9 @@ export class PollingOfficeDataSource implements DataSource {
       );
 
       // Events fire only from the second snapshot on (first paint is silent,
-      // matching the mock).
+      // matching the mock), and never on a policy-driven repopulation.
       const prevSel = this.prevSelection.get(sub.id);
-      if (prevSel) {
+      if (!silent && prevSel) {
         if (this.policy.events["new-post"]) {
           for (const id of selectedIds) {
             if (!prevSel.has(id)) {
@@ -185,6 +242,12 @@ export class PollingOfficeDataSource implements DataSource {
 
       this.prevSelection.set(sub.id, new Set(selectedIds));
       if (topId) this.prevTop.set(sub.id, topId);
+    }
+
+    // Drop Momentum state for posts that have aged out of every hot listing so the
+    // maps can't grow unbounded over a long session.
+    for (const id of this.momentumState.keys()) {
+      if (!liveIds.has(id)) this.momentumState.delete(id);
     }
 
     this.handlers.onSnapshot({ workersByCubicle });
