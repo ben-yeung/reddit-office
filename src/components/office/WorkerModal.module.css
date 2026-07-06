@@ -65,6 +65,20 @@
   margin-left: auto;
   align-self: flex-start;
 }
+/* Community icon links out to the sub on reddit.com. */
+.avatarLink {
+  flex: none;
+  display: block;
+  line-height: 0;
+  border-radius: 50%;
+}
+.avatarLink:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.avatarLink:hover {
+  opacity: 0.88;
+}
 .avatar {
   flex: none;
   width: 40px;
@@ -97,6 +111,15 @@
 }
 .sub {
   font-weight: 700;
+  text-decoration: none;
+}
+.sub:hover {
+  text-decoration: underline;
+}
+.sub:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
 }
 .metaDot {
   color: var(--ink-dim);
