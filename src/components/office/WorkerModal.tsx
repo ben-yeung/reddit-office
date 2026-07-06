@@ -392,6 +392,8 @@ export function WorkerModal({ worker, subreddit, now, onClose }: Props) {
 
   const avatarLetter = subreddit.name.charAt(0).toUpperCase();
   const hasIcon = Boolean(subreddit.iconUrl) && iconOk;
+  // Reddit community page for this sub (name is the bare form, e.g. "programming").
+  const subredditUrl = `https://www.reddit.com/r/${subreddit.name}/`;
   // Body and image are independent: a post can have selftext, an image, or both.
   const hasVideo = worker.kind === "video" && Boolean(worker.video);
   const hasImage = !hasVideo && Boolean(worker.image) && imageOk;
@@ -424,29 +426,44 @@ export function WorkerModal({ worker, subreddit, now, onClose }: Props) {
             the right end of the action row. */}
         <div className={styles.main}>
           <header className={styles.head}>
-            {hasIcon ? (
-              // Real posts carry the sub's community icon; a broken one falls
-              // back to the letter tile below. Plain <img> avoids next/image
-              // remote-domain config, matching the post-media treatment.
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                className={styles.avatarImg}
-                style={{ background: subreddit.color }}
-                src={subreddit.iconUrl}
-                alt=""
-                loading="lazy"
-                onError={() => setIconOk(false)}
-              />
-            ) : (
-              <span className={styles.avatar} style={{ background: subreddit.color }}>
-                {avatarLetter}
-              </span>
-            )}
+            {/* Icon + sub name both link out to the community on reddit.com. */}
+            <a
+              className={styles.avatarLink}
+              href={subredditUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`Open ${subreddit.displayName} on Reddit`}
+            >
+              {hasIcon ? (
+                // Real posts carry the sub's community icon; a broken one falls
+                // back to the letter tile below. Plain <img> avoids next/image
+                // remote-domain config, matching the post-media treatment.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  className={styles.avatarImg}
+                  style={{ background: subreddit.color }}
+                  src={subreddit.iconUrl}
+                  alt=""
+                  loading="lazy"
+                  onError={() => setIconOk(false)}
+                />
+              ) : (
+                <span className={styles.avatar} style={{ background: subreddit.color }}>
+                  {avatarLetter}
+                </span>
+              )}
+            </a>
             <div className={styles.headText}>
               <div className={styles.headTop}>
-                <span className={styles.sub} style={{ color: subreddit.color }}>
+                <a
+                  className={styles.sub}
+                  style={{ color: subreddit.color }}
+                  href={subredditUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
                   {subreddit.displayName}
-                </span>
+                </a>
                 <span className={styles.metaDot}>·</span>
                 <span className={styles.metaDim}>{formatAge(ageMin)}</span>
               </div>

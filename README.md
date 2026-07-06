@@ -2,27 +2,28 @@
 
 An ambient, real-time dashboard that renders a set of subreddits as a bird's-eye, 8-bit pixel-art office.
 
+<img width="1862" height="1077" alt="Screenshot 2025-03-04 110716" src="https://github.com/user-attachments/assets/54ca5649-d1c4-4b74-91cc-89a8dbf90118" />
+
 Each subreddit is a **Cubicle**.
 
 Trending posts scored by **Momentum** are represented as **Workers** inside the cubicle.
 
 Workers animate Reddit **Events** - a new post walks in, a worker glows as it surges in upvotes, a worker is escorted out when its post is removed.
 
-Clicking on workers opens a Reddit-style modal with the post content and media, its subreddit's community icon, real comments, an interactive **Momentum** tag that explains the score, and an "Open in Reddit" link.
-
-Between the cubicles the floor is alive: staffed meeting rooms with a chat and a screen, a working café at the coffee station, and ambient staff moving along the hallways.
+Clicking on workers opens a Reddit-style modal with the post content, comments, and an interactive **Momentum** tag that explains the score.
 
 It runs as a single Next.js app: a thin backend does the Reddit OAuth token exchange and proxies the API, while the client owns polling, roster state, and rendering.
 
 ## How it works
 
 - **Demo mode (default).** Unauthenticated visitors get a curated office of iconic subreddits from a shared server-side cache. No secrets required - it falls back to mock data when Reddit credentials aren't configured.
-- **Authenticated mode.** Log in with Reddit to build the office from your own subscriptions. Read-only scopes only; the user token stays in an httpOnly encrypted cookie and never reaches the browser.
-- **Two-speed polling.** Reddit has no push, so Events come from diffing polls: a slower _discovery poll_ (`/new`, `/rising`) finds new/trending posts, and a fast batched _tracking poll_ (`/api/info`) refreshes live scores and comment counts.
-- **Momentum + Roster.** Each cubicle keeps a bounded roster of workers, ranked by a per-subreddit-normalized momentum score so small and large subs stay comparable.
-- **Office Policy.** Client-persisted config: worker sourcing (New / Momentum / Blended), per-event animation toggles, theme, and ambient life.
+- **Authenticated mode.** Log in with Reddit to build the office from your own subscriptions. Read-only scopes for subscribed subreddits and username; the user token stays in an httpOnly encrypted cookie and never reaches the browser.
+- **Two-speed polling.** Events come from diffing polls: a slower _discovery poll_ (`/new`, `/rising`) finds new/trending posts, and a fast batched _tracking poll_ (`/api/info`) refreshes live scores and comment counts.
+- **Office Policy.** Client-persisted config: worker sourcing (New / Momentum / Blend), per-event animation toggles, theme, subreddit filtering, and shuffle reordering.
 
-Pan/zoom camera over an SVG office. Click a worker for a modal with the post and an "Open in Reddit" link - the app is read-only upon OAuth.
+Pan/zoom camera over an office grid. Click a worker to view the post which outlinks directly to Reddit.
+
+Sprites and details are drawn SVGs on a canvas.
 
 Full design and decision records live in `docs/PRD.md`, `docs/glossary.md`, and `docs/adr/`.
 
