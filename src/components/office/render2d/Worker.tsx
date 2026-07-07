@@ -213,6 +213,10 @@ export function Worker({
   // Higher momentum -> faster idle bob (the worker is "busier").
   const bobDuration = clamp(1.5 - worker.momentum * 0.14, 0.4, 1.5);
 
+  // Score readout: monospaced (pixel font), so the chip width tracks glyph count.
+  const scoreText = formatScore(worker.score);
+  const scoreW = scoreText.length * 7 + 8;
+
   return (
     <motion.g
       style={{ cursor: "pointer" }}
@@ -269,17 +273,30 @@ export function Worker({
               </>
             )}
 
-            {/* score readout */}
-            <text
-              className="pixel-font"
-              x={0}
-              y={30}
-              fontSize={7}
-              fill="var(--ink-dim)"
-              textAnchor="middle"
-            >
-              {formatScore(worker.score)}
-            </text>
+            {/* score readout: themed chip so it reads on any floor / theme */}
+            <g transform="translate(0 28)">
+              <rect
+                x={-scoreW / 2}
+                y={-6.5}
+                width={scoreW}
+                height={13}
+                rx={3}
+                fill="var(--panel)"
+                stroke="var(--panel-border)"
+                strokeWidth={0.75}
+              />
+              <text
+                className="pixel-font"
+                x={0}
+                y={0.5}
+                fontSize={7}
+                fill="var(--ink)"
+                textAnchor="middle"
+                dominantBaseline="central"
+              >
+                {scoreText}
+              </text>
+            </g>
 
             {/* surge FX (arrows) */}
             <motion.g initial={{ opacity: 0, y: -6 }} animate={fx}>

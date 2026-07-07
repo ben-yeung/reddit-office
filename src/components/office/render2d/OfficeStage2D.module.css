@@ -1,0 +1,36 @@
+/* The 2D office's interactive surface: a full-bleed pannable layer that fills the
+   OfficeApp shell. Owns its own cursor + pointer capture (pan/zoom live here now). */
+.stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--floor-b);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.stage:active {
+  cursor: grabbing;
+}
+
+.hint {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.72rem;
+  color: var(--ink-dim);
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  padding: 6px 12px;
+  border-radius: 999px;
+  z-index: 15;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .hint {
+    display: none;
+  }
+}

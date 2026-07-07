@@ -34,4 +34,5 @@ export const DEFAULT_POLICY: OfficePolicy = {
   theme: "dark",
   ambient: true,
   pauseOnModal: false,
+  renderer: "2d",
 };

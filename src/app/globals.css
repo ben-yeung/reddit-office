@@ -2,8 +2,8 @@
   color-scheme: dark;
 
   /* ---- Midnight Office (dark) - default theme ---- */
-  --floor-1: #39404a; /* neutral floor so details contrast */
-  --floor-2: #414954;
+  --floor-1: #444c58; /* neutral floor so details contrast (lifted to brighten the room) */
+  --floor-2: #4b5360;
   --walkway: #3a414d;
   --wall-light: #4a4f5c; /* partition */
   --wall-hi: #5b616f;

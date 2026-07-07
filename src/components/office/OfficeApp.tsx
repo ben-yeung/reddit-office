@@ -1,17 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import { useOffice } from "@/lib/office/useOffice";
-import { useCamera } from "@/lib/camera/useCamera";
-import { useElementSize } from "@/lib/util/useElementSize";
-import { officeExtent } from "@/lib/office/decor";
 import type { Subreddit, Worker } from "@/lib/domain/types";
 import type { OfficePayloadFetcher } from "@/lib/data/PollingOfficeDataSource";
-import { OfficeStage } from "./OfficeStage";
-import { WorkerModal } from "./WorkerModal";
-import { useBackgroundMotionPaused } from "./BackgroundMotion";
-import { Hud } from "@/components/ui/Hud";
+import type { OfficeRendererProps } from "@/lib/office/renderer";
+import { OfficeStage2D } from "./render2d/OfficeStage2D";
+import { OfficeStage3D } from "./render3d/OfficeStage3D";
+import { WorkerModal } from "./overlays/WorkerModal";
+import { useBackgroundMotionPaused } from "./overlays/BackgroundMotion";
 import { PolicyPanel } from "@/components/ui/PolicyPanel";
 import { AuthControl } from "@/components/auth/AuthControl";
 import styles from "./OfficeApp.module.css";
@@ -38,10 +36,12 @@ export interface OfficeAppProps {
 }
 
 /**
- * Office root: composes the data hook, the camera, pointer/zoom handling, and
- * the overlays. Presentational SVG lives in OfficeStage; this owns interaction.
- * The same component renders both the demo office and each authenticated user's
- * office - only the injected data config and branding differ.
+ * Office shell: runs the shared data engine (`useOffice`), holds the selected
+ * worker, applies the theme, and mounts exactly one renderer - the 2D SVG
+ * `OfficeStage2D` or the experimental 3D voxel `OfficeStage3D`, chosen by the
+ * `renderer` policy and swapped live when it changes. Each renderer owns its own
+ * camera + interaction; this shell only supplies the shared `OfficeRendererProps`
+ * and renders the renderer-agnostic overlays (brand, auth, policy, post modal).
  */
 export function OfficeApp({
   subreddits,
@@ -51,9 +51,8 @@ export function OfficeApp({
   onEditSubreddits,
 }: OfficeAppProps) {
   // With the `pauseOnModal` policy on, an open modal freezes the office - both
-  // the sprite motion (OfficeStage) and the data pipeline (useOffice) - so no
-  // motion churns the background behind the modal's blurred backdrop. Off by
-  // default, so normally the office keeps living while a modal is open.
+  // the sprite motion and the data pipeline (useOffice) - so no motion churns the
+  // background behind the modal's blurred backdrop. Off by default.
   const modalOpen = useBackgroundMotionPaused();
   const officeConfig = useMemo(
     () => ({ subreddits, fetchPayload, storageKey }),
@@ -61,13 +60,10 @@ export function OfficeApp({
   );
   const office = useOffice(modalOpen, officeConfig);
   const freezeBackground = modalOpen && office.policy.pauseOnModal;
-  const containerRef = useRef<HTMLDivElement>(null);
-  const size = useElementSize(containerRef);
-  const { camera, panBy, zoomAt, fitTo } = useCamera();
   const [selected, setSelected] = useState<Selection | null>(null);
-  // While a modal is open, freeze office pan/zoom. The modal is portaled to
-  // <body>, but React re-dispatches its events through the React tree to the
-  // stage handlers below, so a text-selection drag would otherwise pan the office.
+  // While a modal is open, freeze renderer interaction (pan/zoom). The modal is
+  // portaled to <body>, but React re-dispatches its events through the React tree
+  // to the stage handlers, so a text-selection drag would otherwise pan the office.
   const interactionLocked = selected !== null;
 
   const subredditsById = useMemo(
@@ -75,7 +71,7 @@ export function OfficeApp({
     [office.subreddits],
   );
 
-  // Stable identity so it doesn't defeat CubicleGroup's memo on every render.
+  // Stable identity so it doesn't defeat the renderer's memoized children.
   const onSelectWorker = useCallback((w: Worker) => {
     setSelected({ worker: w, at: Date.now() });
   }, []);
@@ -85,65 +81,27 @@ export function OfficeApp({
     document.documentElement.dataset.theme = office.policy.theme;
   }, [office.policy.theme]);
 
-  // Fit the whole office (grid + commons) in view on first paint and on layout change.
-  const fittedSeed = useRef<number | null>(null);
-  useEffect(() => {
-    if (size.width && size.height && fittedSeed.current !== office.layout.seed) {
-      fitTo(officeExtent(office.layout), size);
-      fittedSeed.current = office.layout.seed;
-    }
-  }, [size, office.layout, fitTo]);
-
-  // Non-passive wheel listener so we can zoom-to-cursor without page scroll.
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      if (interactionLocked) return;
-      e.preventDefault();
-      const rect = el.getBoundingClientRect();
-      zoomAt(e.clientX - rect.left, e.clientY - rect.top, Math.exp(-e.deltaY * 0.0015));
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, [zoomAt, interactionLocked]);
-
-  const drag = useRef({ active: false, x: 0, y: 0 });
+  const rendererProps: OfficeRendererProps = {
+    subredditsById,
+    layout: office.layout,
+    workersByCubicle: office.workersByCubicle,
+    pulses: office.pulses,
+    ambient: office.policy.ambient,
+    theme: office.policy.theme,
+    paused: freezeBackground,
+    interactionLocked,
+    arriving: office.arriving,
+    migration: office.migration,
+    onSelectWorker,
+  };
 
   return (
-    <div
-      ref={containerRef}
-      className={styles.stage}
-      onPointerDown={(e) => {
-        if (interactionLocked || e.button !== 0) return;
-        drag.current = { active: true, x: e.clientX, y: e.clientY };
-      }}
-      onPointerMove={(e) => {
-        if (interactionLocked || !drag.current.active) return;
-        panBy(e.clientX - drag.current.x, e.clientY - drag.current.y);
-        drag.current.x = e.clientX;
-        drag.current.y = e.clientY;
-      }}
-      onPointerUp={() => {
-        drag.current.active = false;
-      }}
-      onPointerLeave={() => {
-        drag.current.active = false;
-      }}
-    >
-      <OfficeStage
-        subredditsById={subredditsById}
-        layout={office.layout}
-        workersByCubicle={office.workersByCubicle}
-        pulses={office.pulses}
-        camera={camera}
-        viewport={size}
-        ambient={office.policy.ambient}
-        paused={freezeBackground}
-        arriving={office.arriving}
-        migration={office.migration}
-        onSelectWorker={onSelectWorker}
-      />
+    <div className={styles.root}>
+      {office.policy.renderer === "3d" ? (
+        <OfficeStage3D {...rendererProps} />
+      ) : (
+        <OfficeStage2D {...rendererProps} />
+      )}
 
       <div className={styles.topRight}>
         <div className={styles.brand}>
@@ -153,20 +111,12 @@ export function OfficeApp({
         <AuthControl />
       </div>
 
-      <div className={styles.hint}>drag to pan · scroll to zoom · click a worker</div>
-
       <PolicyPanel
         policy={office.policy}
         onChange={office.setPolicy}
         onReset={office.resetLayout}
         shuffling={office.shuffling}
         onEditSubreddits={onEditSubreddits}
-      />
-
-      <Hud
-        onZoomIn={() => zoomAt(size.width / 2, size.height / 2, 1.25)}
-        onZoomOut={() => zoomAt(size.width / 2, size.height / 2, 0.8)}
-        onFit={() => fitTo(officeExtent(office.layout), size)}
       />
 
       <AnimatePresence>

@@ -1,0 +1,431 @@
+"use client";
+
+import { useEffect, useRef } from "react";
+import * as THREE from "three";
+import { CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import type { Worker as WorkerModel } from "@/lib/domain/types";
+import { worldBounds, type Bounds } from "@/lib/data/layout";
+import { officeExtent } from "@/lib/office/decor";
+import type { OfficeRendererProps } from "@/lib/office/renderer";
+import { Hud } from "@/components/ui/Hud";
+import {
+  DARK_PALETTE,
+  WORLD_SCALE,
+  themeConfig,
+  makeOpaqueMaterial,
+  makeFrostMaterial,
+  disposeGroup,
+  type Palette,
+} from "./scene/kit";
+import { buildCubicle } from "./scene/cubicle";
+import { buildAmenity } from "./scene/amenity";
+import { makeIsoCamera, frameOffice, resizeCamera } from "./camera";
+import { reconcileWorkers, advanceWorkers, startMigrate, type CubicleModel } from "./reconcile";
+import styles from "./OfficeStage3D.module.css";
+
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+const MIN_ZOOM = 0.3;
+const MAX_ZOOM = 6;
+
+/** Everything three.js - lives outside React (a per-frame re-render of 72 workers
+    would be nonsense) and is torn down on unmount. */
+interface Engine {
+  scene: THREE.Scene;
+  camera: THREE.OrthographicCamera;
+  renderer: THREE.WebGLRenderer;
+  labelRenderer: CSS2DRenderer;
+  controls: OrbitControls;
+  raycaster: THREE.Raycaster;
+  materials: { opaque: THREE.MeshLambertMaterial; frost: THREE.MeshLambertMaterial };
+  worldGroup: THREE.Group;
+  cubicles: Map<string, CubicleModel>;
+  amenities: THREE.Group[];
+  /** Cubicle-grid extent, for routing walk-in/out aisle paths. */
+  bounds: Bounds;
+  /** Active themed palette for the floor-level scenery (set from the theme prop). */
+  palette: Palette;
+  groundMat: THREE.MeshLambertMaterial;
+  lights: {
+    ambient: THREE.AmbientLight;
+    hemi: THREE.HemisphereLight;
+    fixtureL: THREE.DirectionalLight;
+    fixtureR: THREE.DirectionalLight;
+    front: THREE.DirectionalLight;
+  };
+  clock: THREE.Clock;
+  raf: number;
+  paused: boolean;
+  frameSeed: number | null;
+}
+
+/**
+ * The experimental 3D voxel office renderer. Builds a procedural voxel scene from
+ * the same shared `OfficeRendererProps` the 2D stage consumes, viewed through a
+ * fixed-iso orthographic camera. OrbitControls provides pan/zoom with rotation
+ * disabled (the angle is fixed; free orbit is parked). Workers are diffed into the
+ * scene by the reconciler; clicks are resolved by raycast to open the post modal.
+ *
+ * Enter/exit choreography and event FX are P3+; here workers appear/disappear at
+ * their seats with a subtle idle bob.
+ */
+export function OfficeStage3D({
+  subredditsById,
+  layout,
+  workersByCubicle,
+  paused,
+  interactionLocked,
+  arriving,
+  migration,
+  theme,
+  onSelectWorker,
+}: OfficeRendererProps) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const engineRef = useRef<Engine | null>(null);
+  // Latest props, mirrored into refs so effects keyed on [layout]/[workersByCubicle]
+  // can read the freshest subreddit accents / roster / arrival flag without adding
+  // them as deps. Written in an effect (never during render); declared before the
+  // build/reconcile effects, so on any commit the refs are fresh before they run.
+  const subsRef = useRef(subredditsById);
+  const workersRef = useRef(workersByCubicle);
+  const arrivingRef = useRef(arriving);
+  const migrationRef = useRef(migration);
+  useEffect(() => {
+    subsRef.current = subredditsById;
+    workersRef.current = workersByCubicle;
+    arrivingRef.current = arriving;
+    migrationRef.current = migration;
+  });
+
+  // ---- one-time three.js setup + render loop ----
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const w = host.clientWidth || 1;
+    const h = host.clientHeight || 1;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x14171d); // --page-bg
+
+    const camera = makeIsoCamera(w / h);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: false });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(w, h);
+    renderer.domElement.style.display = "block";
+    host.appendChild(renderer.domElement);
+
+    const labelRenderer = new CSS2DRenderer();
+    labelRenderer.setSize(w, h);
+    const ld = labelRenderer.domElement;
+    ld.style.position = "absolute";
+    ld.style.top = "0";
+    ld.style.left = "0";
+    ld.style.pointerEvents = "none";
+    host.appendChild(ld);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableRotate = false; // fixed iso angle (free orbit parked)
+    controls.screenSpacePanning = true;
+    controls.enableDamping = false;
+    controls.minZoom = MIN_ZOOM;
+    controls.maxZoom = MAX_ZOOM;
+    controls.mouseButtons = {
+      LEFT: THREE.MOUSE.PAN,
+      MIDDLE: THREE.MOUSE.DOLLY,
+      RIGHT: THREE.MOUSE.PAN,
+    };
+    controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_PAN };
+
+    // office lighting: bright, even, overhead fill (intensities/colours themed
+    // per Midnight/Daylight in the build effect via applyTheme).
+    const ambient = new THREE.AmbientLight(0xf4f7ff, 0.8);
+    scene.add(ambient);
+    const hemi = new THREE.HemisphereLight(0xf4f7ff, 0x40454f, 0.95);
+    scene.add(hemi);
+    const fixtureL = new THREE.DirectionalLight(0xeaf0ff, 0.4);
+    fixtureL.position.set(-4, 10, 3);
+    scene.add(fixtureL);
+    const fixtureR = new THREE.DirectionalLight(0xeaf0ff, 0.4);
+    fixtureR.position.set(4, 10, -2);
+    scene.add(fixtureR);
+    const front = new THREE.DirectionalLight(0xffffff, 0.25);
+    front.position.set(0, 3, 8);
+    scene.add(front);
+
+    const groundMat = new THREE.MeshLambertMaterial({ color: DARK_PALETTE.floor });
+    const groundGeo = new THREE.BoxGeometry(6000, 2, 6000);
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.position.y = -1;
+    scene.add(ground);
+
+    const worldGroup = new THREE.Group();
+    scene.add(worldGroup);
+
+    const materials = { opaque: makeOpaqueMaterial(), frost: makeFrostMaterial() };
+
+    const engine: Engine = {
+      scene,
+      camera,
+      renderer,
+      labelRenderer,
+      controls,
+      raycaster: new THREE.Raycaster(),
+      materials,
+      worldGroup,
+      cubicles: new Map(),
+      amenities: [],
+      bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0, width: 0, height: 0 },
+      palette: DARK_PALETTE,
+      groundMat,
+      lights: { ambient, hemi, fixtureL, fixtureR, front },
+      clock: new THREE.Clock(),
+      raf: 0,
+      paused: false,
+      frameSeed: null,
+    };
+    engineRef.current = engine;
+
+    const animate = () => {
+      const t = engine.clock.getElapsedTime();
+      // Progress arrivals/departures and apply the idle bob to seated workers.
+      advanceWorkers(engine.cubicles, t, engine.paused);
+      controls.update();
+      renderer.render(scene, camera);
+      labelRenderer.render(scene, camera);
+      engine.raf = requestAnimationFrame(animate);
+    };
+    animate();
+
+    const ro = new ResizeObserver(() => {
+      const nw = host.clientWidth || 1;
+      const nh = host.clientHeight || 1;
+      renderer.setSize(nw, nh);
+      labelRenderer.setSize(nw, nh);
+      resizeCamera(camera, nw / nh);
+    });
+    ro.observe(host);
+
+    return () => {
+      cancelAnimationFrame(engine.raf);
+      ro.disconnect();
+      controls.dispose();
+      for (const cub of engine.cubicles.values()) disposeGroup(cub.built.group);
+      for (const a of engine.amenities) disposeGroup(a);
+      groundGeo.dispose();
+      groundMat.dispose();
+      materials.opaque.dispose();
+      materials.frost.dispose();
+      renderer.dispose();
+      if (renderer.domElement.parentNode === host) host.removeChild(renderer.domElement);
+      if (ld.parentNode === host) host.removeChild(ld);
+      engineRef.current = null;
+    };
+  }, []);
+
+  // ---- (re)build the world on layout OR theme change (initial + shuffle + theme) ----
+  useEffect(() => {
+    const engine = engineRef.current;
+    const host = hostRef.current;
+    if (!engine || !host) return;
+
+    // Apply the theme first: palette (baked into the rebuilt geometry below) plus
+    // the scene-level colours/lights (updated in place, no rebuild needed for those).
+    const cfg = themeConfig(theme);
+    engine.palette = cfg.palette;
+    if (engine.scene.background instanceof THREE.Color) engine.scene.background.set(cfg.background);
+    engine.groundMat.color.set(cfg.palette.floor);
+    engine.materials.frost.color.set(cfg.palette.wallFrost);
+    const L = engine.lights;
+    L.ambient.intensity = cfg.lights.ambient;
+    L.hemi.intensity = cfg.lights.hemi;
+    L.hemi.color.set(cfg.lights.hemiSky);
+    L.hemi.groundColor.set(cfg.lights.hemiGround);
+    L.fixtureL.intensity = cfg.lights.fixture;
+    L.fixtureR.intensity = cfg.lights.fixture;
+    L.front.intensity = cfg.lights.front;
+
+    // MIGRATION (shuffle): same subreddits + sizes, only grid positions changed.
+    // Rather than rebuild, reposition each cubicle group and walk its workers from
+    // their old desk to the new one (walkBetween). Only runs when a migration is in
+    // flight and the cubicle set matches what's already built.
+    const mig = migrationRef.current;
+    const canMigrate =
+      !!mig &&
+      engine.cubicles.size === layout.cubicles.length &&
+      layout.cubicles.every((c) => engine.cubicles.has(c.subredditId));
+    if (mig && canMigrate) {
+      engine.bounds = worldBounds(layout, 0);
+      const now = engine.clock.getElapsedTime();
+      for (const cubicle of layout.cubicles) {
+        const prev = engine.cubicles.get(cubicle.subredditId)!;
+        prev.built.group.position.set(
+          cubicle.position.x * WORLD_SCALE,
+          0,
+          cubicle.position.y * WORLD_SCALE,
+        );
+        // Replace the model entry (fresh object) so it carries the new cubicle -
+        // needed so later walk-outs route from the new grid cell.
+        const model: CubicleModel = { cubicle, built: prev.built, workers: prev.workers };
+        engine.cubicles.set(cubicle.subredditId, model);
+        const fromPos = mig.from[cubicle.subredditId];
+        for (const [wid, h] of model.workers) {
+          if (h.anim?.kind === "out") continue; // let departing workers keep leaving
+          startMigrate(h, wid, cubicle, fromPos, now);
+        }
+      }
+      engine.frameSeed = layout.seed; // extent unchanged; don't reframe mid-walk
+      return;
+    }
+
+    // Tear down the previous world. Workers are children of their cubicle group,
+    // so disposing the cubicle group tears down their geometry + labels too.
+    for (const cub of engine.cubicles.values()) {
+      engine.worldGroup.remove(cub.built.group);
+      disposeGroup(cub.built.group);
+    }
+    engine.cubicles.clear();
+    for (const a of engine.amenities) {
+      engine.worldGroup.remove(a);
+      disposeGroup(a);
+    }
+    engine.amenities = [];
+    engine.bounds = worldBounds(layout, 0);
+
+    // Build cubicles (each carries a floor name rug at its front entrance).
+    for (const cubicle of layout.cubicles) {
+      const sub = subsRef.current[cubicle.subredditId];
+      if (!sub) continue;
+      const built = buildCubicle(
+        cubicle,
+        engine.materials,
+        { name: sub.displayName, accent: sub.color },
+        engine.palette,
+      );
+      engine.worldGroup.add(built.group);
+      const model: CubicleModel = { cubicle, built, workers: new Map() };
+      engine.cubicles.set(cubicle.subredditId, model);
+      // Populate immediately from the latest roster so a shuffle doesn't blank out.
+      // (A freshly built office is not "arriving" here - the arrival walk-in is
+      // driven by the first populated snapshot in the worker-reconcile effect.)
+      reconcileWorkers(
+        model,
+        workersRef.current[cubicle.subredditId] ?? [],
+        engine.materials.opaque,
+        sub.color,
+        engine.bounds,
+        engine.clock.getElapsedTime(),
+        false,
+      );
+    }
+
+    // Build amenities.
+    for (const placement of layout.amenities) {
+      const a = buildAmenity(placement, engine.materials.opaque, engine.palette);
+      engine.worldGroup.add(a);
+      engine.amenities.push(a);
+    }
+
+    // Frame the office on first build and on each shuffle (layout seed change).
+    if (engine.frameSeed !== layout.seed) {
+      const aspect = (host.clientWidth || 1) / (host.clientHeight || 1);
+      frameOffice(engine.camera, engine.controls, officeExtent(layout), aspect);
+      engine.frameSeed = layout.seed;
+    }
+  }, [layout, theme]);
+
+  // ---- reconcile worker rosters into the scene each snapshot ----
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    const now = engine.clock.getElapsedTime();
+    for (const [id, model] of engine.cubicles) {
+      const color = subsRef.current[id]?.color ?? "#888888";
+      reconcileWorkers(
+        model,
+        workersByCubicle[id] ?? [],
+        engine.materials.opaque,
+        color,
+        engine.bounds,
+        now,
+        arrivingRef.current,
+      );
+    }
+  }, [workersByCubicle]);
+
+  // Note: subreddit name + accent are read from `subsRef` at build/reconcile time.
+  // They're present from first paint (the office's sub set is known up front); later
+  // enrichment only adds community icons, which the 3D labels don't use - so there's
+  // no separate "update labels on enrich" effect.
+
+  // ---- freeze idle motion / camera interaction while a modal is open ----
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (engine) engine.paused = paused;
+  }, [paused]);
+
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (engine) engine.controls.enabled = !interactionLocked;
+  }, [interactionLocked]);
+
+  // ---- click-to-select: raycast worker meshes, distinguishing a click from a pan ----
+  const down = useRef({ x: 0, y: 0 });
+  function pick(clientX: number, clientY: number) {
+    const engine = engineRef.current;
+    const host = hostRef.current;
+    if (!engine || !host) return;
+    const rect = host.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1,
+    );
+    engine.raycaster.setFromCamera(ndc, engine.camera);
+    const groups: THREE.Object3D[] = [];
+    for (const cub of engine.cubicles.values()) {
+      for (const handle of cub.workers.values()) groups.push(handle.group);
+    }
+    const hits = engine.raycaster.intersectObjects(groups, true);
+    if (hits.length === 0) return;
+    let o: THREE.Object3D | null = hits[0].object;
+    while (o && !o.userData.worker) o = o.parent;
+    if (o?.userData.worker) onSelectWorker(o.userData.worker as WorkerModel);
+  }
+
+  function zoomBy(factor: number) {
+    const engine = engineRef.current;
+    if (!engine) return;
+    engine.camera.zoom = clamp(engine.camera.zoom * factor, MIN_ZOOM, MAX_ZOOM);
+    engine.camera.updateProjectionMatrix();
+  }
+
+  function fit() {
+    const engine = engineRef.current;
+    const host = hostRef.current;
+    if (!engine || !host) return;
+    const aspect = (host.clientWidth || 1) / (host.clientHeight || 1);
+    frameOffice(engine.camera, engine.controls, officeExtent(layout), aspect);
+  }
+
+  return (
+    <div
+      ref={hostRef}
+      className={styles.stage}
+      onPointerDown={(e) => {
+        down.current = { x: e.clientX, y: e.clientY };
+      }}
+      onPointerUp={(e) => {
+        if (interactionLocked) return;
+        const moved = Math.hypot(e.clientX - down.current.x, e.clientY - down.current.y);
+        if (moved < 6) pick(e.clientX, e.clientY);
+      }}
+    >
+      <Hud
+        onZoomIn={() => zoomBy(1.25)}
+        onZoomOut={() => zoomBy(0.8)}
+        onFit={fit}
+      />
+      <div className={styles.hint}>drag to pan · scroll to zoom · click a worker</div>
+    </div>
+  );
+}

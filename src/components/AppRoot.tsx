@@ -2,7 +2,7 @@
 
 import { useAuth } from "@/lib/auth/AuthContext";
 import { OfficeApp } from "@/components/office/OfficeApp";
-import { BackgroundMotionProvider } from "@/components/office/BackgroundMotion";
+import { BackgroundMotionProvider } from "@/components/office/overlays/BackgroundMotion";
 import { OnboardingFlow } from "@/components/onboarding/OnboardingFlow";
 import { CURATED_SUBREDDITS } from "@/lib/data/curatedSubreddits";
 import { officeStorageKey } from "@/lib/data/officeSelection";

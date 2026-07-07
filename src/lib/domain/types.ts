@@ -18,6 +18,14 @@ export type WorkerEventType = "new-post" | "trending" | "surge" | "removed";
 export type OfficeTheme = "dark" | "light";
 
 /**
+ * Which renderer draws the office. "2d" is the SVG office (default); "3d" is the
+ * experimental three.js voxel renderer. The office shell mounts exactly one at a
+ * time and swaps live when this changes (see the PolicyPanel toggle); the shared
+ * data engine keeps running across the swap. Persisted, so the choice survives reloads.
+ */
+export type OfficeRenderer = "2d" | "3d";
+
+/**
  * How a post presents its content (mirrors Reddit's `post_hint`, simplified).
  * - "text": a self-text post; {@link Worker.body} carries the copy.
  * - "image": the image is the content; body is usually empty.
@@ -136,6 +144,8 @@ export interface OfficePolicy {
    * at the cost of the background pausing. Off by default.
    */
   pauseOnModal: boolean;
+  /** Which renderer draws the office (2D SVG or the experimental 3D voxel). */
+  renderer: OfficeRenderer;
 }
 
 /** A decorative amenity kind placed on the office floor (not a subreddit). */

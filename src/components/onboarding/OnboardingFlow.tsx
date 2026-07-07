@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { OfficeApp } from "@/components/office/OfficeApp";
-import { BackgroundMotionProvider } from "@/components/office/BackgroundMotion";
+import { BackgroundMotionProvider } from "@/components/office/overlays/BackgroundMotion";
 import { SubredditPicker } from "./SubredditPicker";
 import { loadSelection, saveSelection, officeStorageKey } from "@/lib/data/officeSelection";
 import type { Subreddit } from "@/lib/domain/types";

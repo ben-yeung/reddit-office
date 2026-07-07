@@ -1,0 +1,16 @@
+/* CSS2DRenderer overlay labels (worker score readouts). The overlay container is
+   pointer-events:none so it never eats camera drags. Cubicle names are drawn as
+   floor rugs in the 3D scene, not as overlay labels. */
+
+.score {
+  font-family: var(--font-pixel), monospace;
+  font-size: 0.46rem;
+  line-height: 1;
+  color: var(--ink);
+  /* Themed chip so the count reads on any floor/lighting in both themes. */
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 5px;
+  padding: 2px 5px;
+  white-space: nowrap;
+}

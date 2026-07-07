@@ -1,7 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import type { OfficePolicy, OfficeTheme, SourcingRule, WorkerEventType } from "@/lib/domain/types";
+import type {
+  OfficePolicy,
+  OfficeRenderer,
+  OfficeTheme,
+  SourcingRule,
+  WorkerEventType,
+} from "@/lib/domain/types";
 import styles from "./controls.module.css";
 
 interface Props {
@@ -52,6 +58,15 @@ export function PolicyPanel({ policy, onChange, onReset, shuffling, onEditSubred
 
   function setPauseOnModal(pauseOnModal: boolean) {
     onChange({ ...policy, pauseOnModal });
+  }
+
+  // Switching renderers swaps the office stage live (React unmounts one and mounts
+  // the other in a single commit) while the shared data engine keeps running - no
+  // full reload, so there's no white-flash / double-mount flicker. The 3D stage
+  // disposes its WebGL context on unmount. The choice persists via onChange.
+  function setRenderer(renderer: OfficeRenderer) {
+    if (renderer === policy.renderer) return;
+    onChange({ ...policy, renderer });
   }
 
   return (
@@ -150,6 +165,24 @@ export function PolicyPanel({ policy, onChange, onReset, shuffling, onEditSubred
                 onClick={() => setPauseOnModal(false)}
               >
                 Off
+              </button>
+            </div>
+          </div>
+
+          <div className={styles.group}>
+            <div className={styles.groupLabel}>Renderer</div>
+            <div className={styles.segmented}>
+              <button
+                className={`${styles.segment} ${policy.renderer === "2d" ? styles.segmentOn : ""}`}
+                onClick={() => setRenderer("2d")}
+              >
+                2D
+              </button>
+              <button
+                className={`${styles.segment} ${policy.renderer === "3d" ? styles.segmentOn : ""}`}
+                onClick={() => setRenderer("3d")}
+              >
+                3D · exp
               </button>
             </div>
           </div>

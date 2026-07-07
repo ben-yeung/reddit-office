@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { useAuth } from "@/lib/auth/AuthContext";
 import { useDialog } from "@/lib/util/useDialog";
 import { ModalScrim } from "@/components/ui/ModalScrim";
-import { usePauseBackgroundMotion } from "@/components/office/BackgroundMotion";
+import { usePauseBackgroundMotion } from "@/components/office/overlays/BackgroundMotion";
 import { RedditGlyph } from "./RedditGlyph";
 import styles from "./auth.module.css";
 

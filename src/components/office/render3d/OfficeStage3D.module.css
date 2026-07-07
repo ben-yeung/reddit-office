@@ -1,0 +1,37 @@
+/* The 3D office's interactive surface: a full-bleed layer hosting the WebGL canvas
+   and the CSS2D label overlay. Owns its own cursor + touch handling (OrbitControls
+   pans/zooms; rotation is disabled to hold the fixed iso angle). */
+.stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--page-bg);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.stage:active {
+  cursor: grabbing;
+}
+
+.hint {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.72rem;
+  color: var(--ink-dim);
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  padding: 6px 12px;
+  border-radius: 999px;
+  z-index: 15;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .hint {
+    display: none;
+  }
+}
