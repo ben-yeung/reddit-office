@@ -26,7 +26,7 @@ interface Props {
 const SOURCING: Array<{ value: SourcingRule; label: string }> = [
   { value: "new", label: "New" },
   { value: "momentum", label: "Momentum" },
-  { value: "blend", label: "Blend" },
+  { value: "blend", label: "Blended" },
 ];
 
 const EVENTS: Array<{ value: WorkerEventType; label: string }> = [

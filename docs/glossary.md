@@ -12,7 +12,7 @@ consistently in code, UI copy, and docs. Update as the model sharpens.
 | **Worker** | A single Reddit post, rendered as a persistent animated entity inside its subreddit's cubicle. | Lifespan = TBD (how long does a post stay a worker?). |
 | **Action** | A short animation a worker performs to encode a real-world Reddit event (new post, upvote surge, mod removal, etc.). | The core "utility as spectacle" mechanic. |
 | **Event** | A detected change in Reddit state that triggers an Action. | Source = polling diffs, not push (see ADR-0002). |
-| **Office Policy** | The user's config controlling the office. Two axes: (1) **Worker sourcing** (New / Momentum / Blend) - who fills a Roster; (2) **Event-animation toggles** - which Events fire visible Actions. Plus the subreddit whitelist. | Persisted client-side. See ADR-0005. |
+| **Office Policy** | The user's config controlling the office. Two axes: (1) **Worker sourcing** (New / Momentum / Blended) - who fills a Roster; (2) **Event-animation toggles** - which Events fire visible Actions. Plus the subreddit whitelist. | Persisted client-side. See ADR-0005. |
 | **Onboarding** | Post-login flow where the user picks which subscribed subreddits to "listen to" (become cubicles). | Curated, not exhaustive. See ADR-0004. |
 | **Roster** | The bounded "sliding window" set of notable Workers a cubicle is actively tracking. Not every post - a curated sample. | Size + selection + pruning rules TBD (grilling). |
 | **Discovery poll** | Slower per-subreddit poll (`/new`, `/rising`) that finds new/trending posts. | ~15-30s. See ADR-0002. |

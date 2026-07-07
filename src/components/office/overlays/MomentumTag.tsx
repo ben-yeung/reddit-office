@@ -41,7 +41,7 @@ function gaugePct(momentum: number): number {
   return (clamped / GAUGE_MAX) * 100;
 }
 
-function BoltIcon({ size = 13 }: { size?: number }) {
+function BoltIcon({ size = 15 }: { size?: number }) {
   return (
     <svg
       width={size}
@@ -126,8 +126,8 @@ export function MomentumTag({ momentum, subredditName }: Props) {
         <svg
           className={styles.chevron}
           data-open={open}
-          width="10"
-          height="10"
+          width="11"
+          height="11"
           viewBox="0 0 20 20"
           fill="none"
           stroke="currentColor"

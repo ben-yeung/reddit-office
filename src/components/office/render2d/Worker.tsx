@@ -12,6 +12,9 @@ import styles from "./Worker.module.css";
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
+/** How long a worker takes to walk to a new desk on an intra-cubicle rerank (s). */
+const SEAT_WALK_S = 0.55;
+
 // The migration walk must position the worker at its old desk before the browser
 // paints the reshuffled layout, so it runs in a layout effect. Fall back to a
 // passive effect on the server, where layout effects don't run (and there's no
@@ -32,37 +35,24 @@ function formatScore(n: number): string {
 }
 
 /**
- * The desk fixture for one seat. Rendered in a layer behind all worker bodies
- * (see CubicleGroup), so a newly-seated worker's body is never occluded by this
- * desk or by a departing neighbour's. Keyed by post id: on a swap the incoming
- * occupant's desk fades in over the outgoing one at the same seat, and the desk
- * never translates - it stays in the cubicle when its occupant walks out.
+ * A desk as fixed seat furniture. Rendered once per seat slot (see CubicleGroup),
+ * independent of who - if anyone - sits there, so people walk between desks
+ * instead of the desk teleporting when the roster reshuffles by rank. Drawn in a
+ * layer behind all worker bodies so a seated worker sits in front of the desk.
+ * Its prop is seat-fixed (stable per seat), and an empty seat simply shows an
+ * unoccupied desk.
  */
-export function WorkerDeskSlot({
+export function SeatDesk({
   seat,
   appearance,
   color,
-  worker,
-  onSelect,
 }: {
   seat: Vec2;
   appearance: WorkerAppearance;
   color: string;
-  worker: WorkerModel;
-  onSelect: (worker: WorkerModel) => void;
 }) {
   return (
-    <motion.g
-      style={{ cursor: "pointer" }}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      // Hold through the occupant's walk-out, then fade (masked on a swap by the
-      // replacement's desk already sitting at the same seat).
-      exit={{ opacity: 0, transition: { duration: 0.5, delay: 0.7 } }}
-      transition={{ duration: 0.4 }}
-      onPointerDown={(e) => e.stopPropagation()}
-      onClick={() => onSelect(worker)}
-    >
+    <motion.g initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4 }}>
       <g transform={`translate(${seat.x} ${seat.y})`}>
         <WorkerDesk appearance={appearance} shirtColor={color} />
       </g>
@@ -98,7 +88,9 @@ interface Props {
  * a shuffle relayout it walks from its old desk to its new one (`migration`, the
  * cubicle having jumped to its new cell). This layer also adds behavior - trending
  * glow, momentum-driven bob speed, and one-shot Actions (surge pop, trending
- * wobble) from event pulses. The desk is a separate layer (WorkerDeskSlot).
+ * wobble) from event pulses. The desk is a separate, fixed layer (SeatDesk), so
+ * when the roster reranks, the person walks to their new desk while the furniture
+ * stays put.
  */
 export function Worker({
   worker,
@@ -218,15 +210,27 @@ export function Worker({
   const scoreW = scoreText.length * 7 + 8;
 
   return (
+    // The outer group's x/y is the seat. On an intra-cubicle rerank the seat
+    // changes, and framer walks the worker from its old desk to the new one - a
+    // steady linear stride rather than an ease-glide, so it reads as a walk. Mount
+    // (initial === animate) and shuffle migrations (handled by the inner offset)
+    // leave x/y unchanged, so this transition only animates real seat swaps.
     <motion.g
       style={{ cursor: "pointer" }}
       initial={{ opacity: 0, x: seat.x, y: seat.y }}
       animate={{ opacity: 1, x: seat.x, y: seat.y }}
       exit={exit}
-      transition={{ duration: 0.4, ease: "easeOut" }}
+      transition={{
+        x: { duration: SEAT_WALK_S, ease: "linear" },
+        y: { duration: SEAT_WALK_S, ease: "linear" },
+        opacity: { duration: 0.4, ease: "easeOut" },
+      }}
       onPointerDown={(e) => e.stopPropagation()}
       onClick={() => onSelect(worker)}
     >
+      {/* Whole-workstation hit target: the desk furniture is no longer itself
+          clickable, so keep the seat area easy to click to open the post. */}
+      <rect x={-26} y={-18} width={52} height={50} fill="transparent" />
       {/* Aisle-travel offset group. At rest at (0,0) - dead on the seat. Starts at
           a hallway edge on the initial-load walk-in (enterInitial), and is snapped
           to the old-desk offset on a shuffle migration; either way it animates back

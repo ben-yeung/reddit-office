@@ -17,11 +17,13 @@ It runs as a single Next.js app: a thin backend does the Reddit OAuth token exch
 ## How it works
 
 - **Demo mode (default).** Unauthenticated visitors get a curated office of iconic subreddits from a shared server-side cache. No secrets required - it falls back to mock data when Reddit credentials aren't configured.
-- **Authenticated mode.** Log in with Reddit to build the office from your own subscriptions. Read-only scopes for subscribed reddits and username; the user token stays in an httpOnly encrypted cookie and never reaches the browser.
-- **Two-speed polling.** Reddit has no push, so Events come from diffing polls: a slower _discovery poll_ (`/new`, `/rising`) finds new/trending posts, and a fast batched _tracking poll_ (`/api/info`) refreshes live scores and comment counts.
-- **Office Policy.** Client-persisted config: worker sourcing (New / Momentum / Blend), per-event animation toggles, theme, and ambient life.
+- **Authenticated mode.** Log in with Reddit to build the office from your own subscriptions. Read-only scopes for subscribed subreddits and username; the user token stays in an httpOnly encrypted cookie and never reaches the browser.
+- **Two-speed polling.** Events come from diffing polls: a slower _discovery poll_ (`/new`, `/rising`) finds new/trending posts, and a fast batched _tracking poll_ (`/api/info`) refreshes live scores and comment counts.
+- **Office Policy.** Client-persisted config: worker sourcing (New / Momentum / Blend), per-event animation toggles, theme, subreddit filtering, and shuffle reordering.
 
-Pan/zoom camera over an SVG office. Click a worker to view the post which outlinks directly to Reddit.
+Pan/zoom camera over an office grid. Click a worker to view the post which outlinks directly to Reddit.
+
+Sprites and details are drawn SVGs on a canvas.
 
 Full design and decision records live in `docs/PRD.md`, `docs/glossary.md`, and `docs/adr/`.
 
@@ -58,13 +60,14 @@ These same thresholds power the interactive Momentum tag in the post modal, whic
 ### How the Roster picks who to seat
 
 Every tick, each cubicle re-selects its workers via `selectRoster` (`src/lib/roster/roster.ts`) from the subreddit's candidate posts.
-The bounded roster (`ROSTER_MAX`, currently 6) is filled in two passes:
+The bounded roster (`ROSTER_MAX`, currently 6) is filled by the current **Office Policy** sourcing rule, each self-contained:
 
-1. **Grace period first.** Any post newer than `GRACE_MS` (20s) is guaranteed a slot, newest first, so a fresh post gets a chance to prove traction before momentum has any history on it.
-2. **Then by sourcing rule.** The remaining slots go to candidates that clear a minimum momentum floor (`MIN_MOMENTUM`, 0.35), ranked according to the current **Office Policy** sourcing rule:
-   - **New** - strictly by recency.
-   - **Momentum** - strictly by the normalized score above.
-   - **Blend** (default) - alternates between momentum and recency picks, deduped, so a cubicle mixes what's hot with what's fresh.
+- **New** - only posts created within the last `NEW_WINDOW_MS` (12 hours), newest first. A quiet subreddit honestly shows fewer workers (empty desks) rather than backfilling stale posts.
+- **Momentum** - strictly by measured Momentum (descending), floored at `MIN_MOMENTUM` (0.35). A stale-but-upvoted post whose score has stopped moving decays and is evicted; a fast riser climbs in and takes a seat.
+- **Blended** (default) - `BLEND_FRESH` (4) of the 6 seats go to new-and-surging posts (created within the window and rising above the sub's average pace), the other 2 to the top Momentum leaders, deduped and backfilled from Momentum so a lively cubicle stays full.
+
+Seats encode ranking (seat 0 = top of the roster order), so when Momentum reranks a cubicle the workers walk to swap desks; a small reorder holds steady (`SEAT_HYSTERESIS`) so the office doesn't twitch every poll.
+Because the office polls frequently, Momentum in the live path is measured across polls (velocity normalized against a per-subreddit baseline; see `src/lib/momentum/demoMomentum.ts`), not inferred from a single score - so activity, not a one-time upvote count, decides who sits.
 
 ## Tech stack
 

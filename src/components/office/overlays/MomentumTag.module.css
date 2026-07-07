@@ -9,14 +9,17 @@
 .tag {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 8px 3px 7px;
+  gap: 6px;
+  /* Sized to match the Open-in-Reddit button's height: 7px padding + the 1px
+     border equals the button's 8px padding, so the two read at the same density. */
+  padding: 7px 14px;
   border: 1px solid color-mix(in srgb, var(--tier) 45%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--tier) 14%, transparent);
   color: var(--tier);
   font: inherit;
-  font-size: 0.76rem;
+  /* Matches the action-bar buttons rather than the tiny original tag. */
+  font-size: 0.86rem;
   font-weight: 600;
   /* >1 so the value/label glyphs are never clipped by the tight line box. */
   line-height: 1.15;

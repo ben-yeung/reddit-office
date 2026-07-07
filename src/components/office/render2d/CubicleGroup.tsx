@@ -2,10 +2,11 @@ import { memo } from "react";
 import { AnimatePresence } from "framer-motion";
 import type { Cubicle as CubicleModel, Subreddit, Worker as WorkerModel } from "@/lib/domain/types";
 import type { Pulse } from "@/lib/office/useOffice";
+import { ROSTER_MAX } from "@/lib/domain/constants";
 import { seatPosition, type Bounds } from "@/lib/data/layout";
 import { appearanceFor } from "@/lib/worker/appearance";
 import { Cubicle } from "./Cubicle";
-import { Worker, WorkerDeskSlot, type Migration } from "./Worker";
+import { Worker, SeatDesk, type Migration } from "./Worker";
 
 interface Props {
   cubicle: CubicleModel;
@@ -44,7 +45,19 @@ function CubicleGroupInner({
   migration,
   onSelect,
 }: Props) {
-  // Precompute each worker's local seat + appearance once, shared by both layers.
+  // Fixed desks: one per seat slot, independent of who (if anyone) sits there, so
+  // people walk between desks instead of the desk teleporting on a rank reshuffle.
+  // Props are seat-fixed (stable per seat); an unoccupied seat shows an empty desk.
+  const desks = Array.from({ length: ROSTER_MAX }, (_, i) => {
+    const seatWorld = seatPosition(cubicle, i);
+    return {
+      i,
+      seat: { x: seatWorld.x - cubicle.position.x, y: seatWorld.y - cubicle.position.y },
+      appearance: appearanceFor(`${subreddit.id}#seat${i}`),
+    };
+  });
+
+  // Precompute each worker's local seat + appearance once.
   const placed = workers.map((worker) => {
     const seatWorld = seatPosition(cubicle, worker.seatIndex);
     return {
@@ -64,23 +77,13 @@ function CubicleGroupInner({
     <g transform={`translate(${cubicle.position.x} ${cubicle.position.y})`}>
       <Cubicle cubicle={cubicle} subreddit={subreddit} workerCount={workers.length} />
 
-      {/* Desk fixtures, drawn behind every body so a newly-seated worker sits in
-          front of the desk (in the chair) instead of behind it - even mid-swap
-          while the previous occupant is still walking out. */}
-      <AnimatePresence>
-        {placed.map(({ worker, seat, appearance }) => (
-          <WorkerDeskSlot
-            key={worker.id}
-            seat={seat}
-            appearance={appearance}
-            color={subreddit.color}
-            worker={worker}
-            onSelect={onSelect}
-          />
-        ))}
-      </AnimatePresence>
+      {/* Fixed desk furniture, drawn behind every body so a seated worker sits in
+          front of the desk (in the chair). Furniture stays put; only people move. */}
+      {desks.map(({ i, seat, appearance }) => (
+        <SeatDesk key={i} seat={seat} appearance={appearance} color={subreddit.color} />
+      ))}
 
-      {/* Worker bodies, drawn in front of all desks. */}
+      {/* Worker bodies, drawn in front of all desks; they walk between seats. */}
       <AnimatePresence>
         {placed.map(({ worker, seat, appearance }) => (
           <Worker
