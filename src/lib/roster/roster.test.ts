@@ -52,9 +52,21 @@ describe("selectRoster - momentum sourcing", () => {
     expect(picked.map((p) => p.id)).toEqual(["c", "a", "d"]);
   });
 
-  it("prunes candidates below minMomentum", () => {
+  it("stays full from weak candidates rather than emptying (prune to make room)", () => {
+    // Only "a" clears minMomentum, but momentum is per-sub-relative: a quiet sub
+    // still surfaces its liveliest posts instead of leaving seats empty.
     const picked = selectRoster([c("a", 5), c("b", 0.1), c("c", 0.2)], "momentum", CFG, NOW);
-    expect(picked.map((p) => p.id)).toEqual(["a"]);
+    expect(picked.map((p) => p.id)).toEqual(["a", "c", "b"]);
+  });
+
+  it("prunes the weakest only when there are more candidates than seats", () => {
+    const picked = selectRoster(
+      [c("a", 5), c("b", 0.1), c("c", 0.2), c("d", 9)],
+      "momentum",
+      { ...CFG, maxSize: 2 },
+      NOW,
+    );
+    expect(picked.map((p) => p.id)).toEqual(["d", "a"]);
   });
 });
 
