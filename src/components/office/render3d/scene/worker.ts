@@ -17,10 +17,18 @@ const GLASSES = "#20242c";
 const EARBUD = "#f6f8fc";
 
 /** Head + styled hair + accessory, centred at (0, hy, hz). Shared by both poses. */
-function headBoxes(a: WorkerAppearance, hy: number, hz: number): BoxSpec[] {
+/**
+ * Head + styled hair + accessory, centred at (0, hy, hz). `forward` is which way
+ * the face points (-1 = -z toward the desk when seated, +1 = +z toward travel when
+ * standing), so the asymmetric parts (glasses on the front, hair fall / bun on the
+ * back) align with the pose - otherwise a walking worker's head reads backwards.
+ */
+function headBoxes(a: WorkerAppearance, hy: number, hz: number, forward: number): BoxSpec[] {
   const boxes: BoxSpec[] = [{ color: a.skin, w: 0.42, h: 0.42, d: 0.42, x: 0, y: hy, z: hz }];
   const hairTop = hy + 0.23;
   const cap: BoxSpec = { color: a.hair, w: 0.46, h: 0.16, d: 0.46, x: 0, y: hairTop, z: hz };
+  const back = hz - forward * 0.2; // back-of-head z
+  const bunZ = hz - forward * 0.12;
 
   switch (a.style) {
     case "bald":
@@ -30,12 +38,12 @@ function headBoxes(a: WorkerAppearance, hy: number, hz: number): BoxSpec[] {
       break;
     case "long":
       boxes.push(cap);
-      // hair down the back (the face is -z, so the fall is on the +z side)
-      boxes.push({ color: a.hair, w: 0.46, h: 0.42, d: 0.14, x: 0, y: hy - 0.02, z: hz + 0.2 });
+      // hair falls down the back of the head (opposite the face)
+      boxes.push({ color: a.hair, w: 0.46, h: 0.42, d: 0.14, x: 0, y: hy - 0.02, z: back });
       break;
     case "bun":
       boxes.push(cap);
-      boxes.push({ color: a.hair, w: 0.18, h: 0.18, d: 0.18, x: 0, y: hairTop + 0.12, z: hz + 0.12 });
+      boxes.push({ color: a.hair, w: 0.18, h: 0.18, d: 0.18, x: 0, y: hairTop + 0.12, z: bunZ });
       break;
     case "spiky":
       boxes.push(cap);
@@ -66,7 +74,7 @@ function headBoxes(a: WorkerAppearance, hy: number, hz: number): BoxSpec[] {
 
   switch (a.accessory) {
     case "glasses":
-      boxes.push({ color: GLASSES, w: 0.44, h: 0.06, d: 0.06, x: 0, y: hy + 0.02, z: hz - 0.21 });
+      boxes.push({ color: GLASSES, w: 0.44, h: 0.06, d: 0.06, x: 0, y: hy + 0.02, z: hz + forward * 0.21 });
       break;
     case "headphones":
       boxes.push({ color: GLASSES, w: 0.5, h: 0.07, d: 0.14, x: 0, y: hy + 0.25, z: hz }); // band
@@ -96,22 +104,34 @@ export function seatedBoxes(shirtColor: string, a: WorkerAppearance): BoxSpec[] 
     { color: p, w: 0.2, h: 0.56, d: 0.2, x: 0.15, y: 0.3, z: -0.5 },
     { color: PALETTE.chair, w: 0.22, h: 0.1, d: 0.28, x: -0.15, y: 0.05, z: -0.66 },
     { color: PALETTE.chair, w: 0.22, h: 0.1, d: 0.28, x: 0.15, y: 0.05, z: -0.66 },
-    { color: s, w: 0.17, h: 0.46, d: 0.24, x: -0.39, y: SEAT_Y + 0.4, z: -0.06 },
-    { color: s, w: 0.17, h: 0.46, d: 0.24, x: 0.39, y: SEAT_Y + 0.4, z: -0.06 },
-    ...headBoxes(a, SEAT_Y + 0.94, 0.04),
+    ...headBoxes(a, SEAT_Y + 0.94, 0.04, -1),
   ];
 }
 
-/** Standing torso/arms/head only - legs are separate hip-pivoted meshes (walk cycle). */
-function standingBodyBoxes(shirtColor: string, a: WorkerAppearance): BoxSpec[] {
+/** One seated arm in shoulder-pivot-local space (hangs down from the origin), so it
+    can be raised for a hands-up reaction. */
+function seatedArmBoxes(shirtColor: string, a: WorkerAppearance): BoxSpec[] {
   const s = shade(shirtColor, a.shirtPct);
-  return [
+  return [{ color: s, w: 0.17, h: 0.46, d: 0.24, x: 0, y: -0.23, z: 0 }];
+}
+
+/** Standing torso/head (+ arms unless omitted) - legs are separate hip-pivoted
+    meshes. `arms:false` lets an actor attach its own dynamic arms (e.g. a swinging
+    ping-pong paddle arm). */
+function standingBodyBoxes(shirtColor: string, a: WorkerAppearance, arms: boolean): BoxSpec[] {
+  const s = shade(shirtColor, a.shirtPct);
+  const boxes: BoxSpec[] = [
     { color: s, w: 0.56, h: 0.22, d: 0.34, x: 0, y: 1.02, z: 0 },
     { color: s, w: 0.6, h: 0.62, d: 0.36, x: 0, y: 1.42, z: 0 },
-    { color: s, w: 0.17, h: 0.62, d: 0.22, x: -0.4, y: 1.36, z: 0 },
-    { color: s, w: 0.17, h: 0.62, d: 0.22, x: 0.4, y: 1.36, z: 0 },
-    ...headBoxes(a, 1.97, 0),
+    ...headBoxes(a, 1.97, 0, 1),
   ];
+  if (arms) {
+    boxes.push(
+      { color: s, w: 0.17, h: 0.62, d: 0.22, x: -0.4, y: 1.36, z: 0 },
+      { color: s, w: 0.17, h: 0.62, d: 0.22, x: 0.4, y: 1.36, z: 0 },
+    );
+  }
+  return boxes;
 }
 
 /** One leg + foot, in leg-local space: pivot at the hip (origin), hanging down. */
@@ -124,12 +144,16 @@ function legBoxes(): BoxSpec[] {
 
 export interface WorkerPoses {
   group: THREE.Group;
-  seated: THREE.Mesh;
+  /** The seated rig: merged body mesh + two shoulder-pivoted arms. */
+  seated: THREE.Object3D;
   /** The whole standing rig (body + two leg pivots); shown only while walking. */
   standing: THREE.Group;
   /** Hip-pivoted leg groups, swung by the walk cycle. */
   legL: THREE.Object3D;
   legR: THREE.Object3D;
+  /** Shoulder-pivoted seated arms, raised for the vote/comment hands-up reaction. */
+  armL: THREE.Object3D;
+  armR: THREE.Object3D;
 }
 
 /**
@@ -141,13 +165,23 @@ export function buildWorkerPoses(
   shirtColor: string,
   material: THREE.Material,
   appearance: WorkerAppearance,
+  standingArms = true,
 ): WorkerPoses {
   const group = new THREE.Group();
-  const seated = new THREE.Mesh(mergeBoxes(seatedBoxes(shirtColor, appearance)), material);
+  // Seated rig: merged body + two shoulder-pivoted arms (so they can be thrown up).
+  const seated = new THREE.Group();
+  seated.add(new THREE.Mesh(mergeBoxes(seatedBoxes(shirtColor, appearance)), material));
+  const armL = new THREE.Group();
+  armL.position.set(-0.39, SEAT_Y + 0.63, -0.06);
+  armL.add(new THREE.Mesh(mergeBoxes(seatedArmBoxes(shirtColor, appearance)), material));
+  const armR = new THREE.Group();
+  armR.position.set(0.39, SEAT_Y + 0.63, -0.06);
+  armR.add(new THREE.Mesh(mergeBoxes(seatedArmBoxes(shirtColor, appearance)), material));
+  seated.add(armL, armR);
 
   const standing = new THREE.Group();
   standing.visible = false;
-  standing.add(new THREE.Mesh(mergeBoxes(standingBodyBoxes(shirtColor, appearance)), material));
+  standing.add(new THREE.Mesh(mergeBoxes(standingBodyBoxes(shirtColor, appearance, standingArms)), material));
 
   const legL = new THREE.Group();
   legL.position.set(-0.16, 0.92, 0);
@@ -158,5 +192,5 @@ export function buildWorkerPoses(
   standing.add(legL, legR);
 
   group.add(seated, standing);
-  return { group, seated, standing, legL, legR };
+  return { group, seated, standing, legL, legR, armL, armR };
 }

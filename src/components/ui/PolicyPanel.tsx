@@ -152,7 +152,7 @@ export function PolicyPanel({ policy, onChange, onReset, shuffling, onEditSubred
           </div>
 
           <div className={styles.group}>
-            <div className={styles.groupLabel}>Pause office on open</div>
+            <div className={styles.groupLabel}>Pause Office in Background</div>
             <div className={styles.segmented}>
               <button
                 className={`${styles.segment} ${policy.pauseOnModal ? styles.segmentOn : ""}`}
@@ -170,7 +170,7 @@ export function PolicyPanel({ policy, onChange, onReset, shuffling, onEditSubred
           </div>
 
           <div className={styles.group}>
-            <div className={styles.groupLabel}>Renderer</div>
+            <div className={styles.groupLabel}>Render Type</div>
             <div className={styles.segmented}>
               <button
                 className={`${styles.segment} ${policy.renderer === "2d" ? styles.segmentOn : ""}`}

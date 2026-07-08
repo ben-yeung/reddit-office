@@ -6,7 +6,7 @@ import { seatPosition, type Bounds } from "@/lib/data/layout";
 import { walkIn, walkOut, walkBetween } from "@/lib/office/walkout";
 import { appearanceFor } from "@/lib/worker/appearance";
 import { WORLD_SCALE, disposeGroup } from "./scene/kit";
-import type { BuiltCubicle } from "./scene/cubicle";
+import type { BuiltCubicle, MonitorStatus } from "./scene/cubicle";
 import { buildWorkerPoses } from "./scene/worker";
 import { formatScore, makeScoreLabel } from "./labels";
 
@@ -25,19 +25,32 @@ interface WorkerAnim {
 
 interface WorkerHandle {
   group: THREE.Group;
-  seated: THREE.Mesh;
+  seated: THREE.Object3D;
   standing: THREE.Object3D;
   legL: THREE.Object3D;
   legR: THREE.Object3D;
+  /** Shoulder-pivoted seated arms, raised for the vote/comment hands-up reaction. */
+  armL: THREE.Object3D;
+  armR: THREE.Object3D;
   scoreEl: HTMLElement;
   /** Resting seat position (scene units, cubicle-local). */
   seat: THREE.Vector3;
   phase: number;
   anim: WorkerAnim | null;
+  /** A per-worker transparent material, created for the walk-out opacity fade
+      (matching the ambient commuters); disposed when the worker is removed. */
+  fadeMat: THREE.MeshLambertMaterial | null;
   /** A one-shot event reaction (surge/new-post/trending pop), or null. */
   fx: { type: WorkerEventType; start: number } | null;
   /** Last pulse seq applied, so an event fires its reaction exactly once. */
   fxSeq: number;
+  /** Last-seen score/comments, to diff per-poll deltas that flash on the monitor (P8). */
+  score: number;
+  comments: number;
+  /** Active score-label flash (colour + arrow) from a per-poll change, or null. */
+  scoreFlash: { dir: number; until: number } | null;
+  /** Active hands-up reaction to a per-poll change, or null. */
+  cheer: { start: number } | null;
 }
 
 /** Per-cubicle scene state: the built cubicle + its live worker roster. */
@@ -56,6 +69,31 @@ const STEP_AMP = 0.22;
 
 /** One-shot event reaction duration (s). */
 const FX_DUR = 0.6;
+
+/** How long a per-poll vote/comment delta stays flashed on the monitor (s). */
+const FLASH_DUR = 1.6;
+
+/** Hands-up reaction to a per-poll change: duration (s) and peak arm angle (rad). */
+const CHEER_DUR = 0.7;
+const CHEER_MAX = 2.2;
+
+/** Update a worker's score label in place, applying the per-poll flash (green/red +
+    a direction arrow) while active, else the plain themed readout. */
+function refreshScoreLabel(h: WorkerHandle, now: number): void {
+  const flash = h.scoreFlash && h.scoreFlash.until > now ? h.scoreFlash : null;
+  const txt = formatScore(h.score);
+  const el = h.scoreEl;
+  if (flash) {
+    const up = flash.dir > 0;
+    el.textContent = `${up ? "▲" : "▼"} ${txt}`;
+    el.style.color = up ? "#43c47a" : "#ff5a5a";
+    el.style.fontWeight = "700";
+  } else {
+    el.textContent = txt;
+    el.style.color = "";
+    el.style.fontWeight = "";
+  }
+}
 
 /** How long the walk to a new desk takes on an intra-cubicle rerank (s), matching 2D. */
 const SEAT_WALK_S = 0.55;
@@ -146,6 +184,15 @@ function startWalkOut(h: WorkerHandle, id: string, cubicle: Cubicle, bounds: Bou
     fade: { v: wo.opacity, t: wo.opacityTimes },
   };
   toStanding(h);
+  // Swap to a per-worker transparent material so the exit fades out (matching the
+  // ambient commuters) instead of shrinking. Disposed when the worker is removed.
+  const fadeMat = new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, opacity: 1 });
+  h.group.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh) m.material = fadeMat;
+  });
+  h.fadeMat = fadeMat;
+  h.group.scale.setScalar(1);
 }
 
 /** Seat index recovered from the handle (stored on the group userData). */
@@ -225,6 +272,10 @@ export function reconcileWorkers(
       const score = makeScoreLabel(formatScore(w.score)) as CSS2DObject;
       score.position.set(0, SCORE_Y, 0);
       poses.group.add(score);
+      // The score CSS2DObject itself (not just its element): hidden via `.visible`
+      // while the hover card shows, since CSS2DRenderer resets element display each
+      // frame from `.visible`.
+      poses.group.userData.scoreObj = score;
       h = {
         group: poses.group,
         seated: poses.seated,
@@ -237,6 +288,13 @@ export function reconcileWorkers(
         anim: null,
         fx: null,
         fxSeq: 0,
+        fadeMat: null,
+        score: w.score,
+        comments: w.comments,
+        scoreFlash: null,
+        cheer: null,
+        armL: poses.armL,
+        armR: poses.armR,
       };
       model.workers.set(w.id, h);
       model.built.group.add(poses.group);
@@ -247,7 +305,22 @@ export function reconcileWorkers(
       }
     } else {
       h.group.userData.worker = w; // keep the latest model for picking
-      h.scoreEl.textContent = formatScore(w.score);
+      // P8: diff the per-poll score/comment change and react - flash the score label
+      // (colour + arrow), throw the worker's hands up, and flash the desk monitor.
+      const dScore = w.score - h.score;
+      const dComments = w.comments - h.comments;
+      h.score = w.score;
+      h.comments = w.comments;
+      if (dScore !== 0) h.scoreFlash = { dir: Math.sign(dScore), until: now + FLASH_DUR };
+      refreshScoreLabel(h, now);
+      if (dScore !== 0 || dComments !== 0) {
+        h.cheer = { start: now };
+        const m = model.built.monitors[w.seatIndex];
+        if (m) {
+          (m.userData.redrawFlash as (a: number, b: number) => void)(dScore, dComments);
+          m.userData.flashUntil = now + FLASH_DUR;
+        }
+      }
       // Rerank: the roster reassigned this worker a new seat (hysteresis is applied
       // in the engine, so any change is intended). Walk it to the new desk within
       // the cubicle - a short straight stride - when it's idle (not mid-walk).
@@ -270,6 +343,26 @@ export function reconcileWorkers(
       }
     }
   }
+
+  // P7: reflect each occupied seat's post status on its desk-monitor screen. Compute
+  // the final status per seat, then repaint only the screens whose status changed.
+  const monitors = model.built.monitors;
+  const status: MonitorStatus[] = monitors.map(() => "idle");
+  for (const w of workers) {
+    if (w.seatIndex < status.length) {
+      status[w.seatIndex] = w.removed ? "removed" : w.trending ? "trending" : "idle";
+    }
+  }
+  monitors.forEach((m, i) => {
+    const flashing = ((m.userData.flashUntil as number) ?? 0) > now;
+    const changed = m.userData.status !== status[i];
+    m.userData.status = status[i];
+    // While a delta flash is showing, only update the target status; the render
+    // loop repaints the icon when the flash expires.
+    if (changed && !flashing) {
+      (m.userData.redraw as (s: MonitorStatus) => void)(status[i]);
+    }
+  });
 }
 
 /**
@@ -280,11 +373,26 @@ export function reconcileWorkers(
 export function advanceWorkers(cubicles: Map<string, CubicleModel>, t: number, paused: boolean) {
   for (const model of cubicles.values()) {
     for (const [id, h] of model.workers) {
+      // Expire the per-poll score-label flash back to the plain readout.
+      if (h.scoreFlash && t >= h.scoreFlash.until) {
+        h.scoreFlash = null;
+        refreshScoreLabel(h, t);
+      }
       if (!h.anim) {
         // idle: seated at the desk with a subtle bob (frozen while paused)
         let y = paused ? 0 : Math.sin(t * 2 + h.phase) * 0.03;
         let scale = 1;
         let roll = 0;
+        // Hands-up reaction to a vote/comment change: raise both arms in a V, then
+        // lower them (frozen while paused).
+        let armAngle = 0;
+        if (h.cheer) {
+          const c = (t - h.cheer.start) / CHEER_DUR;
+          if (c >= 1) h.cheer = null;
+          else if (!paused) armAngle = Math.sin(Math.PI * c) * CHEER_MAX;
+        }
+        h.armL.rotation.z = -armAngle;
+        h.armR.rotation.z = armAngle;
         // One-shot event reaction overlaid on the idle pose.
         if (h.fx) {
           const e = (t - h.fx.start) / FX_DUR;
@@ -309,6 +417,7 @@ export function advanceWorkers(cubicles: Map<string, CubicleModel>, t: number, p
         if (h.anim.kind === "out") {
           model.built.group.remove(h.group);
           disposeGroup(h.group);
+          if (h.fadeMat) h.fadeMat.dispose();
           model.workers.delete(id);
         } else {
           // "in" / "move": arrive and sit down at the seat.
@@ -327,7 +436,17 @@ export function advanceWorkers(cubicles: Map<string, CubicleModel>, t: number, p
       const swing = Math.sin(t * STEP_SPEED + h.phase) * STEP_AMP;
       h.legL.rotation.x = swing;
       h.legR.rotation.x = -swing;
-      if (h.anim.fade) h.group.scale.setScalar(sampleScalar(h.anim.fade.v, h.anim.fade.t, u));
+      if (h.anim.fade && h.fadeMat) {
+        h.fadeMat.opacity = sampleScalar(h.anim.fade.v, h.anim.fade.t, u);
+      }
+    }
+    // P8: revert any expired per-poll delta flash back to the status icon.
+    for (const m of model.built.monitors) {
+      const fu = (m.userData.flashUntil as number) ?? 0;
+      if (fu && t >= fu) {
+        m.userData.flashUntil = 0;
+        (m.userData.redraw as (s: MonitorStatus) => void)(m.userData.status as MonitorStatus);
+      }
     }
   }
 }

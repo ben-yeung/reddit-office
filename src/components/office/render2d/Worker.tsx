@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { motion, useAnimationControls } from "framer-motion";
 import type { Cubicle as CubicleModel, Vec2, Worker as WorkerModel } from "@/lib/domain/types";
 import type { Bounds } from "@/lib/data/layout";
@@ -8,6 +8,7 @@ import type { WorkerAppearance } from "@/lib/worker/appearance";
 import type { Pulse } from "@/lib/office/useOffice";
 import { walkBetween, walkIn, walkOut } from "@/lib/office/walkout";
 import { WorkerDesk, WorkerBody } from "./WorkerSprite";
+import { hoverCardHtml } from "../hoverCard";
 import styles from "./Worker.module.css";
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -32,6 +33,55 @@ function formatScore(n: number): string {
   if (n >= 10_000) return `${(n / 1000).toFixed(0)}k`;
   if (n >= 1_000) return `${(n / 1000).toFixed(1)}k`;
   return `${n}`;
+}
+
+function fmtDelta(n: number): string {
+  const a = Math.abs(n);
+  return a >= 1000 ? `${(a / 1000).toFixed(1)}k` : `${a}`;
+}
+
+/** One line of the per-poll delta float (P8): a caret for votes, a bubble for
+    comments, green for a rise and red for a drop. */
+function DeltaRow({ d, kind, y }: { d: number; kind: "vote" | "comment"; y: number }) {
+  const up = d > 0;
+  const col = up ? "#43c47a" : "#ff5a5a";
+  return (
+    <g transform={`translate(0 ${y})`}>
+      {kind === "vote" ? (
+        <path d={up ? "M-13,2 L-9,-6 L-5,2 Z" : "M-13,-6 L-9,2 L-5,-6 Z"} fill={col} />
+      ) : (
+        <>
+          <rect x={-14} y={-6} width={9} height={7} rx={2} fill={col} />
+          <path d="M-12,1 L-13,4 L-9,1 Z" fill={col} />
+        </>
+      )}
+      <text
+        className="pixel-font"
+        x={-2}
+        y={0}
+        fontSize={7}
+        fill={col}
+        textAnchor="start"
+        dominantBaseline="central"
+      >
+        {`${up ? "+" : "-"}${fmtDelta(d)}`}
+      </text>
+    </g>
+  );
+}
+
+/** The stacked vote/comment deltas, drawn above the head (rows grow upward). */
+function DeltaFloat({ dScore, dComments }: { dScore: number; dComments: number }) {
+  const rows: { d: number; kind: "vote" | "comment" }[] = [];
+  if (dScore !== 0) rows.push({ d: dScore, kind: "vote" });
+  if (dComments !== 0) rows.push({ d: dComments, kind: "comment" });
+  return (
+    <>
+      {rows.map((r, i) => (
+        <DeltaRow key={r.kind} d={r.d} kind={r.kind} y={-i * 12} />
+      ))}
+    </>
+  );
 }
 
 /**
@@ -213,6 +263,26 @@ export function Worker({
   // will open (the cursor is already a pointer over the worker group).
   const [hovered, setHovered] = useState(false);
 
+  // P8: on each poll, float the score/comment change above the head. Tracks the
+  // last-seen values in a ref and bumps a keyed float when they change so the
+  // animation replays. No float on mount (prev seeded from the initial values).
+  const prevStats = useRef({ score: worker.score, comments: worker.comments });
+  const floatSeq = useRef(0);
+  const [deltaFloat, setDeltaFloat] = useState<{
+    dScore: number;
+    dComments: number;
+    seq: number;
+  } | null>(null);
+  useEffect(() => {
+    const dScore = worker.score - prevStats.current.score;
+    const dComments = worker.comments - prevStats.current.comments;
+    prevStats.current = { score: worker.score, comments: worker.comments };
+    if (dScore !== 0 || dComments !== 0) {
+      floatSeq.current += 1;
+      setDeltaFloat({ dScore, dComments, seq: floatSeq.current });
+    }
+  }, [worker.score, worker.comments]);
+
   return (
     // The outer group's x/y is the seat. On an intra-cubicle rerank the seat
     // changes, and framer walks the worker from its old desk to the new one - a
@@ -298,36 +368,73 @@ export function Worker({
               </>
             )}
 
-            {/* score readout: themed chip so it reads on any floor / theme */}
-            <g transform="translate(0 28)">
-              <rect
-                x={-scoreW / 2}
-                y={-6.5}
-                width={scoreW}
-                height={13}
-                rx={3}
-                fill="var(--panel)"
-                stroke="var(--panel-border)"
-                strokeWidth={0.75}
-              />
-              <text
-                className="pixel-font"
-                x={0}
-                y={0.5}
-                fontSize={7}
-                fill="var(--ink)"
-                textAnchor="middle"
-                dominantBaseline="central"
+            {/* score readout: a themed chip at rest, expanding to a post-preview
+                card (title + score + comments) on hover - shared with the 3D card. */}
+            {hovered ? (
+              // Bottom-anchored above the head so the card grows upward (never down
+              // over the worker): a full-height flex box pins the card to the bottom.
+              <foreignObject
+                x={-100}
+                y={-164}
+                width={200}
+                height={156}
+                style={{ overflow: "visible", pointerEvents: "none" }}
               >
-                {scoreText}
-              </text>
-            </g>
+                <div
+                  style={{
+                    height: "100%",
+                    display: "flex",
+                    alignItems: "flex-end",
+                    justifyContent: "center",
+                  }}
+                >
+                  <div dangerouslySetInnerHTML={{ __html: hoverCardHtml(worker) }} />
+                </div>
+              </foreignObject>
+            ) : (
+              <g transform="translate(0 28)">
+                <rect
+                  x={-scoreW / 2}
+                  y={-6.5}
+                  width={scoreW}
+                  height={13}
+                  rx={3}
+                  fill="var(--panel)"
+                  stroke="var(--panel-border)"
+                  strokeWidth={0.75}
+                />
+                <text
+                  className="pixel-font"
+                  x={0}
+                  y={0.5}
+                  fontSize={7}
+                  fill="var(--ink)"
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                >
+                  {scoreText}
+                </text>
+              </g>
+            )}
 
             {/* surge FX (arrows) */}
             <motion.g initial={{ opacity: 0, y: -6 }} animate={fx}>
               <path d="M -6 0 L 0 -8 L 6 0 Z" fill="var(--accent)" />
               <path d="M -6 6 L 0 -2 L 6 6 Z" fill="var(--accent-soft)" opacity={0.8} />
             </motion.g>
+
+            {/* P8: per-poll vote/comment delta, floating up above the head */}
+            {deltaFloat && (
+              <motion.g
+                key={deltaFloat.seq}
+                initial={{ opacity: 0, y: -28 }}
+                animate={{ opacity: [0, 1, 1, 0], y: [-28, -40, -46, -54] }}
+                transition={{ duration: 1.4, times: [0, 0.15, 0.7, 1], ease: "easeOut" }}
+                style={{ pointerEvents: "none" }}
+              >
+                <DeltaFloat dScore={deltaFloat.dScore} dComments={deltaFloat.dComments} />
+              </motion.g>
+            )}
           </motion.g>
         </g>
       </motion.g>

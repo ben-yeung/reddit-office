@@ -606,9 +606,9 @@ const STEEL_DK = "#9aa0ab";
 const WOOD = "#4a3528";
 const WOOD_HI = "#5e4535";
 const DARK = "#2c2f36";
-const APRON = "#efe9dc";
-const APRON_DK = "#d8d0bf";
-const BARISTA_SHIRT = "#3f5c48";
+const APRON = "#2e8b57";
+const APRON_DK = "#236b43";
+const BARISTA_SHIRT = "#1c1c20";
 
 /*
  * The whole café is one looping choreography driven by a single shared clock
@@ -858,7 +858,7 @@ function Steam({ x, y }: { x: number; y: number }) {
   );
 }
 
-/** Aproned barista: a green-shirted body with a cream apron, head drawn last so
+/** Aproned barista: a black-shirted body with a green apron, head drawn last so
     it sits cleanly on top of the apron. */
 function BaristaSprite({ seed }: { seed: string }) {
   return (

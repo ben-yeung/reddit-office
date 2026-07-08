@@ -9,6 +9,7 @@ import { worldBounds, type Bounds } from "@/lib/data/layout";
 import { officeExtent } from "@/lib/office/decor";
 import type { OfficeRendererProps } from "@/lib/office/renderer";
 import { Hud } from "@/components/ui/Hud";
+import { hoverCardHtml } from "../hoverCard";
 import {
   DARK_PALETTE,
   WORLD_SCALE,
@@ -20,6 +21,8 @@ import {
 } from "./scene/kit";
 import { buildCubicle } from "./scene/cubicle";
 import { buildAmenity } from "./scene/amenity";
+import { buildWalkers, advanceWalkers, type WalkerSystem } from "./ambient/walkers";
+import { buildAmenityLife, type AmenityLife } from "./ambient/amenityLife";
 import { makeIsoCamera, frameOffice, resizeCamera } from "./camera";
 import {
   reconcileWorkers,
@@ -46,11 +49,25 @@ interface Engine {
   materials: { opaque: THREE.MeshLambertMaterial; frost: THREE.MeshLambertMaterial };
   /** A subtle accent ring on the floor under the hovered worker (selection cue). */
   hoverRing: THREE.Mesh;
+  /** Screen-space preview card (P6): a DOM overlay in its own high-z container,
+      manually projected above the hovered worker so it sits atop other labels and
+      is bottom-anchored (grows upward, never covering the worker). */
+  hoverCardHost: HTMLDivElement;
+  hoverCardEl: HTMLDivElement;
+  hoverCardShown: boolean;
+  /** Pending "show card" timer (a short delay avoids flicker while sweeping). */
+  hoverTimer: number | null;
   /** The worker group currently hovered (so the ring can track a walking worker). */
   hoveredGroup: THREE.Object3D | null;
   worldGroup: THREE.Group;
   cubicles: Map<string, CubicleModel>;
   amenities: THREE.Group[];
+  /** Ambient hallway commuters (P5a); null until first built. */
+  walkers: WalkerSystem | null;
+  /** Animated amenity actors (P5c); null until first built. */
+  amenityLife: AmenityLife | null;
+  /** Ambient-life policy toggle - gates walker visibility + advancement. */
+  ambient: boolean;
   /** Cubicle-grid extent, for routing walk-in/out aisle paths. */
   bounds: Bounds;
   /** Active themed palette for the floor-level scenery (set from the theme prop). */
@@ -84,6 +101,7 @@ export function OfficeStage3D({
   layout,
   workersByCubicle,
   pulses,
+  ambient,
   paused,
   interactionLocked,
   arriving,
@@ -203,6 +221,29 @@ export function OfficeStage3D({
     hoverRing.visible = false;
     scene.add(hoverRing);
 
+    // Preview card (P6): a DOM overlay in its own container above the CSS2D label
+    // layer (z-index 1) so the card sits atop all labels, but below the shell
+    // panel/HUD (z 20+). The loop projects the worker's head to screen space.
+    const hoverCardHost = document.createElement("div");
+    Object.assign(hoverCardHost.style, {
+      position: "absolute",
+      inset: "0",
+      overflow: "visible",
+      pointerEvents: "none",
+      zIndex: "2",
+    } satisfies Partial<CSSStyleDeclaration>);
+    host.appendChild(hoverCardHost);
+    const hoverCardEl = document.createElement("div");
+    Object.assign(hoverCardEl.style, {
+      position: "absolute",
+      transformOrigin: "bottom center",
+      transform: "translate(-50%, -100%) scale(0.85)",
+      opacity: "0",
+      transition: "opacity 120ms ease, transform 120ms ease",
+      pointerEvents: "none",
+    } satisfies Partial<CSSStyleDeclaration>);
+    hoverCardHost.appendChild(hoverCardEl);
+
     const engine: Engine = {
       scene,
       camera,
@@ -212,10 +253,17 @@ export function OfficeStage3D({
       raycaster: new THREE.Raycaster(),
       materials,
       hoverRing,
+      hoverCardHost,
+      hoverCardEl,
+      hoverCardShown: false,
+      hoverTimer: null,
       hoveredGroup: null,
       worldGroup,
       cubicles: new Map(),
       amenities: [],
+      walkers: null,
+      amenityLife: null,
+      ambient: false,
       bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0, width: 0, height: 0 },
       palette: DARK_PALETTE,
       groundMat,
@@ -232,6 +280,15 @@ export function OfficeStage3D({
       const t = engine.clock.getElapsedTime();
       // Progress arrivals/departures and apply the idle bob to seated workers.
       advanceWorkers(engine.cubicles, t, engine.paused);
+      // Ambient hallway commuters, gated by the ambient policy (frozen while paused).
+      if (engine.walkers) {
+        engine.walkers.group.visible = engine.ambient;
+        if (engine.ambient && !engine.paused) advanceWalkers(engine.walkers, t);
+      }
+      if (engine.amenityLife) {
+        engine.amenityLife.group.visible = engine.ambient;
+        if (engine.ambient && !engine.paused) engine.amenityLife.update(t);
+      }
       // Keep the hover ring under the hovered worker (tracks a walking one); hide it
       // if that worker has since been disposed (walked out).
       const hg = engine.hoveredGroup;
@@ -240,9 +297,22 @@ export function OfficeStage3D({
         // Sit clear of the cubicle floor tile (top 0.06) and rug (0.07) to avoid
         // z-fighting; still below the seated worker so it reads as an under-ring.
         engine.hoverRing.position.set(hoverPos.x, 0.14, hoverPos.z);
+        if (engine.hoverCardShown) {
+          // Project a point just above the head to screen; the card is bottom-anchored
+          // there (transform translate(-50%,-100%)) so it grows upward.
+          hoverPos.y += 2.2;
+          hoverPos.project(engine.camera);
+          const w = host.clientWidth;
+          const h2 = host.clientHeight;
+          engine.hoverCardEl.style.left = `${(hoverPos.x * 0.5 + 0.5) * w}px`;
+          engine.hoverCardEl.style.top = `${(-hoverPos.y * 0.5 + 0.5) * h2 - 8}px`;
+        }
       } else if (hg) {
+        // hovered worker was disposed (walked out): clear everything.
         engine.hoveredGroup = null;
         engine.hoverRing.visible = false;
+        engine.hoverCardShown = false;
+        engine.hoverCardEl.style.opacity = "0";
         host.style.cursor = "";
       }
       controls.update();
@@ -263,10 +333,13 @@ export function OfficeStage3D({
 
     return () => {
       cancelAnimationFrame(engine.raf);
+      if (engine.hoverTimer != null) clearTimeout(engine.hoverTimer);
       ro.disconnect();
       controls.dispose();
       for (const cub of engine.cubicles.values()) disposeGroup(cub.built.group);
       for (const a of engine.amenities) disposeGroup(a);
+      if (engine.walkers) engine.walkers.dispose();
+      if (engine.amenityLife) engine.amenityLife.dispose();
       groundGeo.dispose();
       groundMat.dispose();
       materials.opaque.dispose();
@@ -276,6 +349,7 @@ export function OfficeStage3D({
       renderer.dispose();
       if (renderer.domElement.parentNode === host) host.removeChild(renderer.domElement);
       if (ld.parentNode === host) host.removeChild(ld);
+      if (hoverCardHost.parentNode === host) host.removeChild(hoverCardHost);
       engineRef.current = null;
     };
   }, []);
@@ -378,10 +452,27 @@ export function OfficeStage3D({
 
     // Build amenities.
     for (const placement of layout.amenities) {
-      const a = buildAmenity(placement, engine.materials.opaque, engine.palette);
+      const a = buildAmenity(placement, engine.materials, engine.palette);
       engine.worldGroup.add(a);
       engine.amenities.push(a);
     }
+
+    // Ambient hallway commuters (rebuilt with the office; visibility + advancement
+    // are gated by the `ambient` policy in the render loop).
+    if (engine.walkers) {
+      engine.worldGroup.remove(engine.walkers.group);
+      engine.walkers.dispose();
+    }
+    engine.walkers = buildWalkers(layout);
+    engine.worldGroup.add(engine.walkers.group);
+
+    // Animated amenity actors (rebuilt with the office; gated in the loop).
+    if (engine.amenityLife) {
+      engine.worldGroup.remove(engine.amenityLife.group);
+      engine.amenityLife.dispose();
+    }
+    engine.amenityLife = buildAmenityLife(layout, engine.materials.opaque);
+    engine.worldGroup.add(engine.amenityLife.group);
 
     // Frame the office on first build and on each shuffle (layout seed change).
     if (engine.frameSeed !== layout.seed) {
@@ -433,6 +524,11 @@ export function OfficeStage3D({
     if (engine) engine.controls.enabled = !interactionLocked;
   }, [interactionLocked]);
 
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (engine) engine.ambient = ambient;
+  }, [ambient]);
+
   // ---- picking + hover: raycast worker groups ----
   const down = useRef({ x: 0, y: 0 });
 
@@ -458,16 +554,48 @@ export function OfficeStage3D({
     return o;
   }
 
-  /** Show the floor selection ring under the hovered worker + a pointer cursor
-      (subtle - it never recolours the worker). The render loop tracks the ring to
-      the worker and hides it if that worker is disposed. `null` clears. */
+  /** Highlight the hovered worker: floor ring + pointer cursor, and (after a short
+      delay) a preview card that expands from the score chip. The render loop tracks
+      both to the worker and clears them if it's disposed. `null` clears. */
   function setHover(group: THREE.Object3D | null) {
     const engine = engineRef.current;
     if (!engine || engine.hoveredGroup === group) return;
+    const prev = engine.hoveredGroup;
     engine.hoveredGroup = group;
     engine.hoverRing.visible = !!group;
     const host = hostRef.current;
-    if (host) host.style.cursor = group ? "pointer" : "";
+
+    // Restore the previously-hovered worker's small score chip.
+    if (prev) {
+      const obj = prev.userData.scoreObj as { visible: boolean } | undefined;
+      if (obj) obj.visible = true;
+    }
+    if (engine.hoverTimer != null) {
+      clearTimeout(engine.hoverTimer);
+      engine.hoverTimer = null;
+    }
+
+    if (group) {
+      const w = group.userData.worker as WorkerModel | undefined;
+      if (w) engine.hoverCardEl.innerHTML = hoverCardHtml(w);
+      const show = () => {
+        if (engineRef.current?.hoveredGroup !== group) return;
+        const obj = group.userData.scoreObj as { visible: boolean } | undefined;
+        if (obj) obj.visible = false; // hide the chip; the card takes over
+        engine.hoverCardShown = true;
+        engine.hoverCardEl.style.opacity = "1";
+        engine.hoverCardEl.style.transform = "translate(-50%, -100%) scale(1)";
+      };
+      // Already showing (sweeping worker to worker): swap instantly; else brief delay.
+      if (engine.hoverCardShown) show();
+      else engine.hoverTimer = window.setTimeout(show, 120);
+      if (host) host.style.cursor = "pointer";
+    } else {
+      engine.hoverCardShown = false;
+      engine.hoverCardEl.style.opacity = "0";
+      engine.hoverCardEl.style.transform = "translate(-50%, -100%) scale(0.85)";
+      if (host) host.style.cursor = "";
+    }
   }
 
   function pick(clientX: number, clientY: number) {

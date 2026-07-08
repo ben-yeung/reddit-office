@@ -10,7 +10,7 @@ import { CUBICLE_W, CUBICLE_H, SEAT_COLS, SEAT_ROWS } from "@/lib/domain/constan
 import { mulberry32, type Rng } from "@/lib/util/rng";
 
 /** Bump when the layout scheme changes so stale persisted layouts regenerate. */
-export const LAYOUT_VERSION = 11;
+export const LAYOUT_VERSION = 12;
 export const GAP_X = 90;
 export const GAP_Y = 90;
 /** Grid cell pitch (a cubicle footprint plus its gap). */
@@ -36,8 +36,8 @@ const MEETING: AmenitySpec = { kind: "meeting", w: 228, h: 148 };
  */
 const TOP_STRUCTURES: AmenitySpec[] = [
   { kind: "lounge", w: 196, h: 128 },
-  { kind: "pingpong", w: 152, h: 96 },
-  { kind: "coffee", w: 200, h: 96 },
+  { kind: "pingpong", w: 152, h: 128 },
+  { kind: "coffee", w: 200, h: 128 },
 ];
 
 function shuffled<T>(arr: readonly T[], rng: Rng): T[] {

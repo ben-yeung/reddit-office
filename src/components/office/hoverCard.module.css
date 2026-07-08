@@ -1,0 +1,80 @@
+/* Shared post-preview card shown on worker hover (P6). Used by both renderers:
+   the 3D CSS2D overlay (screen-space px) and the 2D SVG <foreignObject> (world
+   units). Themed via CSS variables; never intercepts pointer events so a click
+   still opens the full post modal. */
+.card {
+  width: 200px;
+  box-sizing: border-box;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--ink);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+.title {
+  font-size: 12px;
+  line-height: 1.34;
+  font-weight: 500;
+  color: var(--ink);
+}
+/* Content-type tag row (image / video / text). */
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  letter-spacing: 0.02em;
+  /* Category colour set inline as --tier; tinted pill like the momentum pill. */
+  color: var(--tier, var(--ink-dim));
+  background: color-mix(in srgb, var(--tier, var(--ink-dim)) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tier, var(--ink-dim)) 40%, transparent);
+  border-radius: 5px;
+  padding: 1.5px 6px;
+}
+.tic {
+  width: 11px;
+  height: 10px;
+  fill: currentColor;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 7px;
+  font-size: 10.5px;
+  color: var(--ink-dim);
+}
+.meta b {
+  color: var(--ink);
+  font-weight: 600;
+}
+/* Momentum multiplier, pushed to the right of the stat row as a pill - colour-coded
+   by tier (--tier set inline), matching the post modal's momentum tag convention. */
+.mom {
+  margin-left: auto;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--tier, var(--accent));
+  background: color-mix(in srgb, var(--tier, var(--accent)) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tier, var(--accent)) 45%, transparent);
+  border-radius: 999px;
+  padding: 1.5px 7px;
+}
+.ic {
+  width: 11px;
+  height: 11px;
+  fill: currentColor;
+  vertical-align: -1px;
+}
