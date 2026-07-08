@@ -5,10 +5,19 @@
  * cubicle's bounded Roster under the Office Policy sourcing rule, then place them
  * in seats. Each sourcing rule is self-contained (ADR-0005, revised):
  *
- * - "new":      only posts created within `newWindowMs`, newest first.
- * - "momentum": strictly by measured Momentum (desc), floored at `minMomentum`.
+ * - "new":      the newest posts, newest first (in-window first, then backfilled).
+ * - "momentum": the highest-Momentum posts (desc), up to `maxSize`.
  * - "blend":    a few top-Momentum leaders + the rest new-and-surging, deduped
  *               and backfilled from Momentum so the cubicle stays full.
+ *
+ * Momentum is a per-subreddit-*relative* score (ADR-0005), so its absolute scale
+ * shifts with a sub's activity. `minMomentum` therefore only decides which posts
+ * are strong enough to be called Momentum *leaders*; it never leaves a physical
+ * seat empty. A cubicle always surfaces its most-alive posts up to `maxSize`
+ * whenever candidates exist - pruning "makes room" (a lower post is replaced),
+ * it does not empty the office. This keeps busy subs full instead of collapsing
+ * as a few viral posts inflate the baseline and sink every typical post below the
+ * floor.
  *
  * Seats encode ranking (seat 0 = top of the returned order). A returning worker
  * keeps its seat while its rank stays close to it (hysteresis), so the office
@@ -48,12 +57,18 @@ function isFresh(c: RosterCandidate, now: number, windowMs: number): boolean {
 }
 
 /**
- * Blended: momentum leaders take the front seats, new-and-surging posts fill the
- * fresh half (newest first), and any leftover seats are backfilled from the
- * momentum pool so a lively sub still shows a full cubicle.
+ * Blended: momentum leaders (those clearing `minMomentum`) take the front seats,
+ * new-and-surging posts fill the fresh half (newest first), and any leftover seats
+ * are backfilled from the best remaining live posts - regardless of the floor - so
+ * the cubicle always stays full when candidates exist.
  */
-function blendRoster<T extends RosterCandidate>(candidates: T[], cfg: RosterConfig, now: number): T[] {
-  const momentumPool = candidates.filter((c) => c.momentum >= cfg.minMomentum).sort(byMomentum);
+function blendRoster<T extends RosterCandidate>(
+  candidates: T[],
+  cfg: RosterConfig,
+  now: number,
+): T[] {
+  const ranked = candidates.slice().sort(byMomentum);
+  const leaderPool = ranked.filter((c) => c.momentum >= cfg.minMomentum);
   const freshPool = candidates
     .filter((c) => isFresh(c, now, cfg.newWindowMs) && c.momentum >= cfg.risingMomentum)
     .sort(byNewest);
@@ -69,7 +84,7 @@ function blendRoster<T extends RosterCandidate>(candidates: T[], cfg: RosterConf
   };
 
   let leaders = 0;
-  for (const c of momentumPool) {
+  for (const c of leaderPool) {
     if (leaders >= momentumSeats) break;
     if (take(c)) leaders++;
   }
@@ -80,9 +95,10 @@ function blendRoster<T extends RosterCandidate>(candidates: T[], cfg: RosterConf
     if (take(c)) fresh++;
   }
 
-  // Backfill any seats the fresh half couldn't fill, so the cubicle stays full
-  // when enough candidates exist.
-  for (const c of momentumPool) {
+  // Backfill remaining seats from *all* live candidates (best Momentum first), not
+  // just the above-floor leaders, so the cubicle stays full whenever posts exist -
+  // an eviction is always a replacement, never a net-empty seat (ADR-0005).
+  for (const c of ranked) {
     if (picked.length >= cfg.maxSize) break;
     take(c);
   }
@@ -102,15 +118,21 @@ export function selectRoster<T extends RosterCandidate>(
 ): T[] {
   switch (sourcing) {
     case "new":
-      return candidates
-        .filter((c) => isFresh(c, now, cfg.newWindowMs))
-        .sort(byNewest)
-        .slice(0, cfg.maxSize);
+      // The newest posts, best-first, filled to maxSize. The New window still
+      // marks what counts as genuinely "fresh" (Blended's fresh-and-surging pool,
+      // new-post events), but it no longer gates occupancy here: sorting by recency
+      // puts in-window posts first and then backfills with the next-newest, so a
+      // sub whose posts have aged past the window keeps a full cubicle instead of
+      // draining over a session. Only a sub with fewer than maxSize live posts
+      // shows fewer.
+      return candidates.slice().sort(byNewest).slice(0, cfg.maxSize);
     case "momentum":
-      return candidates
-        .filter((c) => c.momentum >= cfg.minMomentum)
-        .sort(byMomentum)
-        .slice(0, cfg.maxSize);
+      // The most-alive posts, best first. No absolute floor: a quiet sub still
+      // shows its liveliest posts rather than emptying (ADR-0005 - "niche
+      // favorites never look permanently dead"). Ordering already puts the
+      // strongest first, so any pruning of weak posts happens only when there are
+      // more than `maxSize` candidates.
+      return candidates.slice().sort(byMomentum).slice(0, cfg.maxSize);
     case "blend":
       return blendRoster(candidates, cfg, now);
   }
@@ -152,7 +174,12 @@ export function assignSeats(
   ranked.forEach((id, rank) => {
     const old = prev[id];
     // Keep the current seat when it's still free and close to the new rank.
-    if (old !== undefined && old < maxSeats && !used.has(old) && Math.abs(rank - old) < hysteresis) {
+    if (
+      old !== undefined &&
+      old < maxSeats &&
+      !used.has(old) &&
+      Math.abs(rank - old) < hysteresis
+    ) {
       next[id] = old;
       used.add(old);
       return;

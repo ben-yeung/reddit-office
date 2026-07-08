@@ -17,8 +17,8 @@ import {
   SEAT_HYSTERESIS,
 } from "@/lib/domain/constants";
 import { selectRoster, assignSeats, type RosterCandidate } from "@/lib/roster/roster";
-import { advanceMomentum, scorePrior } from "@/lib/momentum/demoMomentum";
-import type { Baseline } from "@/lib/momentum/momentum";
+import { advanceMomentum, scorePrior, updateBaselineRobust } from "@/lib/momentum/demoMomentum";
+import type { Baseline, Velocity } from "@/lib/momentum/momentum";
 import { MockDataSource } from "./MockDataSource";
 import type { DemoOfficePayload, RedditPostDTO } from "@/lib/reddit/dto";
 
@@ -174,23 +174,28 @@ export class PollingOfficeDataSource implements DataSource {
       const posts = this.postsBySub[sub.id] ?? [];
       const maxScore = Math.max(1, ...posts.map((p) => p.score));
 
-      // Measure each post's Momentum from its change since the last poll, threading
-      // the sub's baseline through them (seeded lazily on first velocity). A
-      // first-sight post falls back to a score prior so the office is populated
-      // immediately; a stale post whose score isn't moving decays toward zero.
-      let baseline: Baseline | null = this.baselines.get(sub.id) ?? null;
+      // Measure each post's Momentum from its change since the last poll, judging
+      // every post against the same start-of-poll baseline. A first-sight post
+      // falls back to a score prior so the office is populated immediately; a stale
+      // post whose score isn't moving decays toward zero.
+      const baseline: Baseline | null = this.baselines.get(sub.id) ?? null;
       const momentumById = new Map<string, number>();
+      const velocities: Velocity[] = [];
       const candidates: RosterCandidate[] = posts.map((p) => {
         liveIds.add(p.id);
         const prev = this.momentumState.get(p.id) ?? null;
         const curr: StatSample = { t: now, score: p.score, comments: p.comments };
         const reading = advanceMomentum(prev, curr, baseline, scorePrior(p.score, maxScore));
-        baseline = reading.baseline;
+        if (reading.velocity) velocities.push(reading.velocity);
         this.momentumState.set(p.id, { sample: reading.sample, momentum: reading.momentum });
         momentumById.set(p.id, reading.momentum);
         return { id: p.id, createdAt: p.createdAt, momentum: reading.momentum };
       });
-      if (baseline) this.baselines.set(sub.id, baseline);
+      // Fold this poll's velocities into the sub baseline by their median, so a few
+      // viral posts can't inflate the "normal pace" and sink every typical post
+      // below the Momentum floor.
+      const nextBaseline = updateBaselineRobust(baseline, velocities);
+      if (nextBaseline) this.baselines.set(sub.id, nextBaseline);
 
       const selectedIds = selectRoster(
         candidates,

@@ -18,7 +18,7 @@ function c(id: string, momentum: number, ageMs = 6 * HOUR): RosterCandidate {
 }
 
 describe("selectRoster - new sourcing", () => {
-  it("keeps only posts within the window, newest first", () => {
+  it("orders by recency, in-window posts first then backfilled, staying full", () => {
     const picked = selectRoster(
       [
         c("old", 9, 4 * HOUR), // outside the window
@@ -30,13 +30,21 @@ describe("selectRoster - new sourcing", () => {
       CFG,
       NOW,
     );
-    // Momentum is irrelevant to New; only recency inside the window matters.
-    expect(picked.map((p) => p.id)).toEqual(["recent", "mid"]);
+    // Momentum is irrelevant to New. In-window posts (newest first) lead, then the
+    // out-of-window ones backfill so the cubicle stays full rather than emptying.
+    expect(picked.map((p) => p.id)).toEqual(["recent", "mid", "old", "older"]);
   });
 
-  it("shows fewer when little is fresh, rather than backfilling old posts", () => {
+  it("backfills past the window rather than leaving seats empty", () => {
+    // Nothing is inside the 3h window, but New still fills from the newest posts so
+    // the office doesn't drain as posts age out of the window.
     const picked = selectRoster([c("a", 9, 5 * HOUR), c("b", 8, 4 * HOUR)], "new", CFG, NOW);
-    expect(picked).toHaveLength(0);
+    expect(picked.map((p) => p.id)).toEqual(["b", "a"]);
+  });
+
+  it("shows fewer only when there are fewer live posts than seats", () => {
+    const picked = selectRoster([c("a", 9, 5 * HOUR)], "new", CFG, NOW);
+    expect(picked).toHaveLength(1);
   });
 });
 
@@ -52,9 +60,21 @@ describe("selectRoster - momentum sourcing", () => {
     expect(picked.map((p) => p.id)).toEqual(["c", "a", "d"]);
   });
 
-  it("prunes candidates below minMomentum", () => {
+  it("stays full from weak candidates rather than emptying (prune to make room)", () => {
+    // Only "a" clears minMomentum, but momentum is per-sub-relative: a quiet sub
+    // still surfaces its liveliest posts instead of leaving seats empty.
     const picked = selectRoster([c("a", 5), c("b", 0.1), c("c", 0.2)], "momentum", CFG, NOW);
-    expect(picked.map((p) => p.id)).toEqual(["a"]);
+    expect(picked.map((p) => p.id)).toEqual(["a", "c", "b"]);
+  });
+
+  it("prunes the weakest only when there are more candidates than seats", () => {
+    const picked = selectRoster(
+      [c("a", 5), c("b", 0.1), c("c", 0.2), c("d", 9)],
+      "momentum",
+      { ...CFG, maxSize: 2 },
+      NOW,
+    );
+    expect(picked.map((p) => p.id)).toEqual(["d", "a"]);
   });
 });
 
