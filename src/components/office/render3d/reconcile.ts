@@ -1,8 +1,10 @@
 import * as THREE from "three";
 import type { CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
-import type { Cubicle, Vec2, Worker as WorkerModel } from "@/lib/domain/types";
+import type { Cubicle, Vec2, Worker as WorkerModel, WorkerEventType } from "@/lib/domain/types";
+import type { Pulse } from "@/lib/office/useOffice";
 import { seatPosition, type Bounds } from "@/lib/data/layout";
 import { walkIn, walkOut, walkBetween } from "@/lib/office/walkout";
+import { appearanceFor } from "@/lib/worker/appearance";
 import { WORLD_SCALE, disposeGroup } from "./scene/kit";
 import type { BuiltCubicle } from "./scene/cubicle";
 import { buildWorkerPoses } from "./scene/worker";
@@ -32,6 +34,10 @@ interface WorkerHandle {
   seat: THREE.Vector3;
   phase: number;
   anim: WorkerAnim | null;
+  /** A one-shot event reaction (surge/new-post/trending pop), or null. */
+  fx: { type: WorkerEventType; start: number } | null;
+  /** Last pulse seq applied, so an event fires its reaction exactly once. */
+  fxSeq: number;
 }
 
 /** Per-cubicle scene state: the built cubicle + its live worker roster. */
@@ -47,6 +53,12 @@ const SCORE_Y = 2.3;
 /** Walk cycle: leg swing rate (rad/s) and amplitude (rad) - subtle, brisk steps. */
 const STEP_SPEED = 9;
 const STEP_AMP = 0.22;
+
+/** One-shot event reaction duration (s). */
+const FX_DUR = 0.6;
+
+/** How long the walk to a new desk takes on an intra-cubicle rerank (s), matching 2D. */
+const SEAT_WALK_S = 0.55;
 
 /** Cubicle-local (unscaled) seat offset - the coordinate space walkout.ts expects. */
 function seatOffset(cubicle: Cubicle, seatIndex: number): Vec2 {
@@ -189,7 +201,7 @@ export function reconcileWorkers(
   model: CubicleModel,
   workers: WorkerModel[],
   material: THREE.Material,
-  shirtColor: THREE.ColorRepresentation,
+  shirtColor: string,
   bounds: Bounds,
   now: number,
   arriving: boolean,
@@ -206,7 +218,7 @@ export function reconcileWorkers(
   for (const w of workers) {
     let h = model.workers.get(w.id);
     if (!h) {
-      const poses = buildWorkerPoses(shirtColor, material);
+      const poses = buildWorkerPoses(shirtColor, material, appearanceFor(w.id));
       poses.group.userData.worker = w;
       poses.group.userData.seatIndex = w.seatIndex;
       const seat = model.built.seatLocal[w.seatIndex] ?? model.built.seatLocal[0];
@@ -223,6 +235,8 @@ export function reconcileWorkers(
         seat: seat.clone(),
         phase: (w.seatIndex * 1.7) % (Math.PI * 2),
         anim: null,
+        fx: null,
+        fxSeq: 0,
       };
       model.workers.set(w.id, h);
       model.built.group.add(poses.group);
@@ -234,6 +248,26 @@ export function reconcileWorkers(
     } else {
       h.group.userData.worker = w; // keep the latest model for picking
       h.scoreEl.textContent = formatScore(w.score);
+      // Rerank: the roster reassigned this worker a new seat (hysteresis is applied
+      // in the engine, so any change is intended). Walk it to the new desk within
+      // the cubicle - a short straight stride - when it's idle (not mid-walk).
+      const shownSeat = (h.group.userData.seatIndex as number) ?? 0;
+      if (w.seatIndex !== shownSeat && !h.anim) {
+        const from = h.seat;
+        const to = model.built.seatLocal[w.seatIndex] ?? from;
+        h.anim = {
+          kind: "move",
+          start: now,
+          duration: SEAT_WALK_S,
+          px: [from.x, to.x],
+          pz: [from.z, to.z],
+          pt: [0, 1],
+        };
+        h.seat = to.clone();
+        h.group.userData.seatIndex = w.seatIndex;
+        toStanding(h);
+        h.group.position.set(from.x, 0, from.z);
+      }
     }
   }
 }
@@ -248,7 +282,26 @@ export function advanceWorkers(cubicles: Map<string, CubicleModel>, t: number, p
     for (const [id, h] of model.workers) {
       if (!h.anim) {
         // idle: seated at the desk with a subtle bob (frozen while paused)
-        h.group.position.set(h.seat.x, paused ? 0 : Math.sin(t * 2 + h.phase) * 0.03, h.seat.z);
+        let y = paused ? 0 : Math.sin(t * 2 + h.phase) * 0.03;
+        let scale = 1;
+        let roll = 0;
+        // One-shot event reaction overlaid on the idle pose.
+        if (h.fx) {
+          const e = (t - h.fx.start) / FX_DUR;
+          if (e >= 1) {
+            h.fx = null;
+          } else if (h.fx.type === "surge") {
+            scale = 1 + 0.35 * Math.sin(Math.PI * e); // pop up + a little hop
+            y += 0.15 * Math.sin(Math.PI * e);
+          } else if (h.fx.type === "new-post") {
+            scale = 1 + 0.22 * Math.sin(Math.PI * e);
+          } else if (h.fx.type === "trending") {
+            roll = 0.22 * Math.sin(e * Math.PI * 3) * (1 - e); // decaying wobble
+          }
+        }
+        h.group.position.set(h.seat.x, y, h.seat.z);
+        h.group.scale.setScalar(scale);
+        h.group.rotation.z = roll;
         continue;
       }
       const u = (t - h.anim.start) / h.anim.duration;
@@ -275,6 +328,28 @@ export function advanceWorkers(cubicles: Map<string, CubicleModel>, t: number, p
       h.legL.rotation.x = swing;
       h.legR.rotation.x = -swing;
       if (h.anim.fade) h.group.scale.setScalar(sampleScalar(h.anim.fade.v, h.anim.fade.t, u));
+    }
+  }
+}
+
+/**
+ * Trigger one-shot event reactions from the latest pulses (keyed by worker id):
+ * arms each affected worker's `fx` once per pulse seq, which the render loop then
+ * animates (surge/new-post pop, trending wobble). "removed" pulses are ignored -
+ * the walk-out is that worker's exit.
+ */
+export function applyPulses(
+  cubicles: Map<string, CubicleModel>,
+  pulses: Record<string, Pulse>,
+  now: number,
+) {
+  for (const model of cubicles.values()) {
+    for (const [id, h] of model.workers) {
+      const p = pulses[id];
+      if (p && p.type !== "removed" && h.fxSeq !== p.seq) {
+        h.fxSeq = p.seq;
+        h.fx = { type: p.type, start: now };
+      }
     }
   }
 }

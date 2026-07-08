@@ -1,21 +1,91 @@
 import * as THREE from "three";
+import { shade, type WorkerAppearance } from "@/lib/worker/appearance";
 import { PALETTE, mergeBoxes, type BoxSpec } from "./kit";
 
 /**
  * Voxel workers come in two poses that swap as a unit (an 8-bit "frame change",
  * not smooth IK): a SEATED pose for resting at the desk, and a STANDING pose for
- * walking the aisles (arrival / departure / migration). Both face -z (toward the
- * desk), so from the front iso camera we see the worker's back at rest.
+ * walking the aisles. Both face -z (toward the desk).
  *
- * The shirt/torso/arms take the subreddit accent (`shirtColor`); everything else
- * is fixed palette. Each pose is one merged, vertex-coloured mesh (one draw call).
- * Trait variety (hair styles, accessories, props) is parked to a later phase.
+ * Appearance (hair style + colour, skin, shirt shade, accessory) is seeded per
+ * post id via the shared `appearanceFor`, so a given post looks identical in the
+ * 2D and 3D offices. Each pose is one merged, vertex-coloured mesh (one draw call);
+ * desk props stay 2D-only (3D desks are shared seat furniture, not per-worker).
  */
 const SEAT_Y = 0.72;
+const GLASSES = "#20242c";
+const EARBUD = "#f6f8fc";
+
+/** Head + styled hair + accessory, centred at (0, hy, hz). Shared by both poses. */
+function headBoxes(a: WorkerAppearance, hy: number, hz: number): BoxSpec[] {
+  const boxes: BoxSpec[] = [{ color: a.skin, w: 0.42, h: 0.42, d: 0.42, x: 0, y: hy, z: hz }];
+  const hairTop = hy + 0.23;
+  const cap: BoxSpec = { color: a.hair, w: 0.46, h: 0.16, d: 0.46, x: 0, y: hairTop, z: hz };
+
+  switch (a.style) {
+    case "bald":
+      break;
+    case "short":
+      boxes.push(cap);
+      break;
+    case "long":
+      boxes.push(cap);
+      // hair down the back (the face is -z, so the fall is on the +z side)
+      boxes.push({ color: a.hair, w: 0.46, h: 0.42, d: 0.14, x: 0, y: hy - 0.02, z: hz + 0.2 });
+      break;
+    case "bun":
+      boxes.push(cap);
+      boxes.push({ color: a.hair, w: 0.18, h: 0.18, d: 0.18, x: 0, y: hairTop + 0.12, z: hz + 0.12 });
+      break;
+    case "spiky":
+      boxes.push(cap);
+      boxes.push({ color: a.hair, w: 0.1, h: 0.14, d: 0.1, x: -0.12, y: hairTop + 0.12, z: hz });
+      boxes.push({ color: a.hair, w: 0.1, h: 0.16, d: 0.1, x: 0, y: hairTop + 0.13, z: hz });
+      boxes.push({ color: a.hair, w: 0.1, h: 0.14, d: 0.1, x: 0.12, y: hairTop + 0.12, z: hz });
+      break;
+    case "beanie":
+      boxes.push({ color: a.cap, w: 0.48, h: 0.24, d: 0.48, x: 0, y: hairTop - 0.02, z: hz });
+      boxes.push({ color: shade(a.cap, -0.3), w: 0.5, h: 0.07, d: 0.5, x: 0, y: hairTop - 0.12, z: hz });
+      break;
+    case "noogler": {
+      // The Google "Noogler" propeller beanie: a light cap crowned with four
+      // colour panels (blue/red/yellow/green) and a little propeller on top.
+      boxes.push({ color: "#f4f6fb", w: 0.48, h: 0.16, d: 0.48, x: 0, y: hairTop - 0.02, z: hz });
+      const py = hairTop + 0.06;
+      boxes.push({ color: 0x4285f4, w: 0.22, h: 0.12, d: 0.22, x: -0.12, y: py, z: hz - 0.12 });
+      boxes.push({ color: 0xea4335, w: 0.22, h: 0.12, d: 0.22, x: 0.12, y: py, z: hz - 0.12 });
+      boxes.push({ color: 0xfbbc05, w: 0.22, h: 0.12, d: 0.22, x: -0.12, y: py, z: hz + 0.12 });
+      boxes.push({ color: 0x34a853, w: 0.22, h: 0.12, d: 0.22, x: 0.12, y: py, z: hz + 0.12 });
+      // propeller: hub + two crossed blades
+      boxes.push({ color: GLASSES, w: 0.06, h: 0.1, d: 0.06, x: 0, y: hairTop + 0.16, z: hz });
+      boxes.push({ color: "#e7e2d8", w: 0.32, h: 0.035, d: 0.07, x: 0, y: hairTop + 0.22, z: hz });
+      boxes.push({ color: "#e7e2d8", w: 0.07, h: 0.035, d: 0.32, x: 0, y: hairTop + 0.22, z: hz });
+      break;
+    }
+  }
+
+  switch (a.accessory) {
+    case "glasses":
+      boxes.push({ color: GLASSES, w: 0.44, h: 0.06, d: 0.06, x: 0, y: hy + 0.02, z: hz - 0.21 });
+      break;
+    case "headphones":
+      boxes.push({ color: GLASSES, w: 0.5, h: 0.07, d: 0.14, x: 0, y: hy + 0.25, z: hz }); // band
+      boxes.push({ color: GLASSES, w: 0.08, h: 0.18, d: 0.18, x: -0.24, y: hy, z: hz }); // cups
+      boxes.push({ color: GLASSES, w: 0.08, h: 0.18, d: 0.18, x: 0.24, y: hy, z: hz });
+      break;
+    case "earbuds":
+      boxes.push({ color: EARBUD, w: 0.06, h: 0.06, d: 0.06, x: -0.23, y: hy, z: hz });
+      boxes.push({ color: EARBUD, w: 0.06, h: 0.06, d: 0.06, x: 0.23, y: hy, z: hz });
+      break;
+    case "none":
+      break;
+  }
+  return boxes;
+}
 
 /** Seated: pelvis on the chair, thighs forward (-z), shins down, torso upright. */
-export function seatedBoxes(shirtColor: THREE.ColorRepresentation): BoxSpec[] {
-  const s = shirtColor;
+export function seatedBoxes(shirtColor: string, a: WorkerAppearance): BoxSpec[] {
+  const s = shade(shirtColor, a.shirtPct);
   const p = PALETTE.pants;
   return [
     { color: s, w: 0.56, h: 0.24, d: 0.36, x: 0, y: SEAT_Y, z: 0.02 },
@@ -28,25 +98,19 @@ export function seatedBoxes(shirtColor: THREE.ColorRepresentation): BoxSpec[] {
     { color: PALETTE.chair, w: 0.22, h: 0.1, d: 0.28, x: 0.15, y: 0.05, z: -0.66 },
     { color: s, w: 0.17, h: 0.46, d: 0.24, x: -0.39, y: SEAT_Y + 0.4, z: -0.06 },
     { color: s, w: 0.17, h: 0.46, d: 0.24, x: 0.39, y: SEAT_Y + 0.4, z: -0.06 },
-    { color: PALETTE.skin, w: 0.42, h: 0.42, d: 0.42, x: 0, y: SEAT_Y + 0.94, z: 0.04 },
-    { color: PALETTE.hair, w: 0.46, h: 0.16, d: 0.46, x: 0, y: SEAT_Y + 1.17, z: 0.02 },
+    ...headBoxes(a, SEAT_Y + 0.94, 0.04),
   ];
 }
 
-/** Height of the hip pivot the standing legs swing from. */
-const HIP_Y = 0.92;
-
-/** Standing torso/arms/head only - the legs are separate, hip-pivoted meshes so
-    they can swing for the walk cycle (a merged body can't animate limbs). */
-function standingBodyBoxes(shirtColor: THREE.ColorRepresentation): BoxSpec[] {
-  const s = shirtColor;
+/** Standing torso/arms/head only - legs are separate hip-pivoted meshes (walk cycle). */
+function standingBodyBoxes(shirtColor: string, a: WorkerAppearance): BoxSpec[] {
+  const s = shade(shirtColor, a.shirtPct);
   return [
     { color: s, w: 0.56, h: 0.22, d: 0.34, x: 0, y: 1.02, z: 0 },
     { color: s, w: 0.6, h: 0.62, d: 0.36, x: 0, y: 1.42, z: 0 },
     { color: s, w: 0.17, h: 0.62, d: 0.22, x: -0.4, y: 1.36, z: 0 },
     { color: s, w: 0.17, h: 0.62, d: 0.22, x: 0.4, y: 1.36, z: 0 },
-    { color: PALETTE.skin, w: 0.42, h: 0.42, d: 0.42, x: 0, y: 1.97, z: 0 },
-    { color: PALETTE.hair, w: 0.46, h: 0.16, d: 0.46, x: 0, y: 2.2, z: 0 },
+    ...headBoxes(a, 1.97, 0),
   ];
 }
 
@@ -69,27 +133,27 @@ export interface WorkerPoses {
 }
 
 /**
- * Build a worker holding both poses. Seated is one merged mesh; standing is a rig
- * (merged body + two hip-pivoted leg groups) so the legs can swing while walking.
- * Only one pose is visible at a time (seated by default); the reconciler/loop
- * swaps them and drives the leg swing + facing at walk boundaries.
+ * Build a worker holding both poses, with seeded appearance. Seated is one merged
+ * mesh; standing is a rig (merged body + two hip-pivoted leg groups) so the legs
+ * can swing while walking. Only one pose is visible at a time (seated by default).
  */
 export function buildWorkerPoses(
-  shirtColor: THREE.ColorRepresentation,
+  shirtColor: string,
   material: THREE.Material,
+  appearance: WorkerAppearance,
 ): WorkerPoses {
   const group = new THREE.Group();
-  const seated = new THREE.Mesh(mergeBoxes(seatedBoxes(shirtColor)), material);
+  const seated = new THREE.Mesh(mergeBoxes(seatedBoxes(shirtColor, appearance)), material);
 
   const standing = new THREE.Group();
   standing.visible = false;
-  standing.add(new THREE.Mesh(mergeBoxes(standingBodyBoxes(shirtColor)), material));
+  standing.add(new THREE.Mesh(mergeBoxes(standingBodyBoxes(shirtColor, appearance)), material));
 
   const legL = new THREE.Group();
-  legL.position.set(-0.16, HIP_Y, 0);
+  legL.position.set(-0.16, 0.92, 0);
   legL.add(new THREE.Mesh(mergeBoxes(legBoxes()), material));
   const legR = new THREE.Group();
-  legR.position.set(0.16, HIP_Y, 0);
+  legR.position.set(0.16, 0.92, 0);
   legR.add(new THREE.Mesh(mergeBoxes(legBoxes()), material));
   standing.add(legL, legR);
 

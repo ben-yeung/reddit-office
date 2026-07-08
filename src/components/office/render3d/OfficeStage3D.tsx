@@ -21,7 +21,13 @@ import {
 import { buildCubicle } from "./scene/cubicle";
 import { buildAmenity } from "./scene/amenity";
 import { makeIsoCamera, frameOffice, resizeCamera } from "./camera";
-import { reconcileWorkers, advanceWorkers, startMigrate, type CubicleModel } from "./reconcile";
+import {
+  reconcileWorkers,
+  advanceWorkers,
+  startMigrate,
+  applyPulses,
+  type CubicleModel,
+} from "./reconcile";
 import styles from "./OfficeStage3D.module.css";
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -38,6 +44,10 @@ interface Engine {
   controls: OrbitControls;
   raycaster: THREE.Raycaster;
   materials: { opaque: THREE.MeshLambertMaterial; frost: THREE.MeshLambertMaterial };
+  /** A subtle accent ring on the floor under the hovered worker (selection cue). */
+  hoverRing: THREE.Mesh;
+  /** The worker group currently hovered (so the ring can track a walking worker). */
+  hoveredGroup: THREE.Object3D | null;
   worldGroup: THREE.Group;
   cubicles: Map<string, CubicleModel>;
   amenities: THREE.Group[];
@@ -73,6 +83,7 @@ export function OfficeStage3D({
   subredditsById,
   layout,
   workersByCubicle,
+  pulses,
   paused,
   interactionLocked,
   arriving,
@@ -122,20 +133,32 @@ export function OfficeStage3D({
     ld.style.top = "0";
     ld.style.left = "0";
     ld.style.pointerEvents = "none";
+    // A low positive z-index makes this container its own stacking context, so the
+    // per-label z-indices CSS2DRenderer assigns stay clamped beneath it - above the
+    // canvas, but below the shell overlays (Policy panel z20, HUD z20, brand z25).
+    ld.style.zIndex = "1";
     host.appendChild(ld);
 
     const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableRotate = false; // fixed iso angle (free orbit parked)
+    // Left-drag pans, right-drag orbits, scroll zooms. Polar limits keep the camera
+    // above the floor (never under it) and off a full top-down. The frosted
+    // see-through walls + the floor name rug keep each cubicle readable from any
+    // angle, so no camera-relative wall logic is needed.
+    controls.enableRotate = true;
+    controls.rotateSpeed = 0.6;
+    controls.minPolarAngle = 0.15;
+    controls.maxPolarAngle = 1.45;
     controls.screenSpacePanning = true;
-    controls.enableDamping = false;
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
     controls.minZoom = MIN_ZOOM;
     controls.maxZoom = MAX_ZOOM;
     controls.mouseButtons = {
       LEFT: THREE.MOUSE.PAN,
       MIDDLE: THREE.MOUSE.DOLLY,
-      RIGHT: THREE.MOUSE.PAN,
+      RIGHT: THREE.MOUSE.ROTATE,
     };
-    controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_PAN };
+    controls.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
 
     // office lighting: bright, even, overhead fill (intensities/colours themed
     // per Midnight/Daylight in the build effect via applyTheme).
@@ -164,6 +187,22 @@ export function OfficeStage3D({
 
     const materials = { opaque: makeOpaqueMaterial(), frost: makeFrostMaterial() };
 
+    // Hover selection ring: a thin accent ring laid flat on the floor, moved under
+    // the hovered worker. Unlit + depthWrite off so it reads as a subtle overlay,
+    // not a recolour of the worker.
+    const hoverRingGeo = new THREE.RingGeometry(0.62, 0.82, 40);
+    const hoverRingMat = new THREE.MeshBasicMaterial({
+      color: 0xff5a1f,
+      transparent: true,
+      opacity: 0.8,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const hoverRing = new THREE.Mesh(hoverRingGeo, hoverRingMat);
+    hoverRing.rotation.x = -Math.PI / 2;
+    hoverRing.visible = false;
+    scene.add(hoverRing);
+
     const engine: Engine = {
       scene,
       camera,
@@ -172,6 +211,8 @@ export function OfficeStage3D({
       controls,
       raycaster: new THREE.Raycaster(),
       materials,
+      hoverRing,
+      hoveredGroup: null,
       worldGroup,
       cubicles: new Map(),
       amenities: [],
@@ -186,10 +227,24 @@ export function OfficeStage3D({
     };
     engineRef.current = engine;
 
+    const hoverPos = new THREE.Vector3();
     const animate = () => {
       const t = engine.clock.getElapsedTime();
       // Progress arrivals/departures and apply the idle bob to seated workers.
       advanceWorkers(engine.cubicles, t, engine.paused);
+      // Keep the hover ring under the hovered worker (tracks a walking one); hide it
+      // if that worker has since been disposed (walked out).
+      const hg = engine.hoveredGroup;
+      if (hg && hg.parent) {
+        hg.getWorldPosition(hoverPos);
+        // Sit clear of the cubicle floor tile (top 0.06) and rug (0.07) to avoid
+        // z-fighting; still below the seated worker so it reads as an under-ring.
+        engine.hoverRing.position.set(hoverPos.x, 0.14, hoverPos.z);
+      } else if (hg) {
+        engine.hoveredGroup = null;
+        engine.hoverRing.visible = false;
+        host.style.cursor = "";
+      }
       controls.update();
       renderer.render(scene, camera);
       labelRenderer.render(scene, camera);
@@ -216,6 +271,8 @@ export function OfficeStage3D({
       groundMat.dispose();
       materials.opaque.dispose();
       materials.frost.dispose();
+      hoverRingGeo.dispose();
+      hoverRingMat.dispose();
       renderer.dispose();
       if (renderer.domElement.parentNode === host) host.removeChild(renderer.domElement);
       if (ld.parentNode === host) host.removeChild(ld);
@@ -353,6 +410,13 @@ export function OfficeStage3D({
     }
   }, [workersByCubicle]);
 
+  // ---- one-shot event reactions (surge/new-post/trending) from pulses ----
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    applyPulses(engine.cubicles, pulses, engine.clock.getElapsedTime());
+  }, [pulses]);
+
   // Note: subreddit name + accent are read from `subsRef` at build/reconcile time.
   // They're present from first paint (the office's sub set is known up front); later
   // enrichment only adds community icons, which the 3D labels don't use - so there's
@@ -369,12 +433,14 @@ export function OfficeStage3D({
     if (engine) engine.controls.enabled = !interactionLocked;
   }, [interactionLocked]);
 
-  // ---- click-to-select: raycast worker meshes, distinguishing a click from a pan ----
+  // ---- picking + hover: raycast worker groups ----
   const down = useRef({ x: 0, y: 0 });
-  function pick(clientX: number, clientY: number) {
+
+  /** Raycast the pointer against worker groups; returns the worker group or null. */
+  function pickGroup(clientX: number, clientY: number): THREE.Object3D | null {
     const engine = engineRef.current;
     const host = hostRef.current;
-    if (!engine || !host) return;
+    if (!engine || !host) return null;
     const rect = host.getBoundingClientRect();
     const ndc = new THREE.Vector2(
       ((clientX - rect.left) / rect.width) * 2 - 1,
@@ -386,10 +452,27 @@ export function OfficeStage3D({
       for (const handle of cub.workers.values()) groups.push(handle.group);
     }
     const hits = engine.raycaster.intersectObjects(groups, true);
-    if (hits.length === 0) return;
+    if (hits.length === 0) return null;
     let o: THREE.Object3D | null = hits[0].object;
     while (o && !o.userData.worker) o = o.parent;
-    if (o?.userData.worker) onSelectWorker(o.userData.worker as WorkerModel);
+    return o;
+  }
+
+  /** Show the floor selection ring under the hovered worker + a pointer cursor
+      (subtle - it never recolours the worker). The render loop tracks the ring to
+      the worker and hides it if that worker is disposed. `null` clears. */
+  function setHover(group: THREE.Object3D | null) {
+    const engine = engineRef.current;
+    if (!engine || engine.hoveredGroup === group) return;
+    engine.hoveredGroup = group;
+    engine.hoverRing.visible = !!group;
+    const host = hostRef.current;
+    if (host) host.style.cursor = group ? "pointer" : "";
+  }
+
+  function pick(clientX: number, clientY: number) {
+    const group = pickGroup(clientX, clientY);
+    if (group?.userData.worker) onSelectWorker(group.userData.worker as WorkerModel);
   }
 
   function zoomBy(factor: number) {
@@ -413,19 +496,31 @@ export function OfficeStage3D({
       className={styles.stage}
       onPointerDown={(e) => {
         down.current = { x: e.clientX, y: e.clientY };
+        setHover(null); // starting a drag: revert to the grab cursor (CSS)
+      }}
+      onPointerMove={(e) => {
+        // Hover only when idle: not while a modal is open, and not mid-drag (pan).
+        if (interactionLocked || e.buttons !== 0) {
+          if (interactionLocked) setHover(null);
+          return;
+        }
+        setHover(pickGroup(e.clientX, e.clientY));
       }}
       onPointerUp={(e) => {
         if (interactionLocked) return;
         const moved = Math.hypot(e.clientX - down.current.x, e.clientY - down.current.y);
         if (moved < 6) pick(e.clientX, e.clientY);
       }}
+      onPointerLeave={() => setHover(null)}
     >
       <Hud
         onZoomIn={() => zoomBy(1.25)}
         onZoomOut={() => zoomBy(0.8)}
         onFit={fit}
       />
-      <div className={styles.hint}>drag to pan · scroll to zoom · click a worker</div>
+      <div className={styles.hint}>
+        drag to pan · right-drag to orbit · scroll to zoom · click a worker
+      </div>
     </div>
   );
 }

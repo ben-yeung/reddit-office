@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState, type CSSProperties } from "react";
 import { motion, useAnimationControls } from "framer-motion";
 import type { Cubicle as CubicleModel, Vec2, Worker as WorkerModel } from "@/lib/domain/types";
 import type { Bounds } from "@/lib/data/layout";
@@ -209,6 +209,10 @@ export function Worker({
   const scoreText = formatScore(worker.score);
   const scoreW = scoreText.length * 7 + 8;
 
+  // Hover outline: highlight the worker under the cursor so it's clear what a click
+  // will open (the cursor is already a pointer over the worker group).
+  const [hovered, setHovered] = useState(false);
+
   return (
     // The outer group's x/y is the seat. On an intra-cubicle rerank the seat
     // changes, and framer walks the worker from its old desk to the new one - a
@@ -226,6 +230,8 @@ export function Worker({
         opacity: { duration: 0.4, ease: "easeOut" },
       }}
       onPointerDown={(e) => e.stopPropagation()}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
       onClick={() => onSelect(worker)}
     >
       {/* Whole-workstation hit target: the desk furniture is no longer itself
@@ -244,6 +250,21 @@ export function Worker({
           style={animate ? ({ "--bob-dur": `${bobDuration}s` } as CSSProperties) : undefined}
         >
           <motion.g animate={sprite}>
+            {/* hover cue (behind the body): a subtle accent selection ring on the
+                floor, mirroring the 3D renderer - never a fill over the worker. */}
+            {hovered && (
+              <ellipse
+                cx={0}
+                cy={13}
+                rx={15}
+                ry={6}
+                fill="none"
+                stroke="var(--accent)"
+                strokeWidth={1.5}
+                opacity={0.85}
+              />
+            )}
+
             {/* trending glow (behind the body) */}
             {worker.trending && (
               <>

@@ -33,6 +33,11 @@
   --panel: rgba(20, 22, 29, 0.92);
   --panel-border: #3a3f4b;
   --page-bg: #14171d;
+  /* Subtle fills for controls (segmented tracks, buttons, hovers). Light overlay
+     on the dark theme; a dark overlay on the light theme (see below) so toggles
+     keep their contrast/grouping in both. */
+  --control-fill: rgba(255, 255, 255, 0.06);
+  --control-fill-strong: rgba(255, 255, 255, 0.12);
 }
 
 html[data-theme="light"] {
@@ -70,6 +75,9 @@ html[data-theme="light"] {
   --panel: rgba(244, 245, 241, 0.94);
   --panel-border: #c9ccbf;
   --page-bg: #eef0ea;
+  /* Dark overlays so control fills read on the light panel. */
+  --control-fill: rgba(0, 0, 0, 0.06);
+  --control-fill-strong: rgba(0, 0, 0, 0.11);
 }
 
 * {
