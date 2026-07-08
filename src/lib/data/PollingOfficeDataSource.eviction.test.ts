@@ -73,13 +73,17 @@ function post(id: string, createdAt: number, score: number, scoreRate: number): 
   };
 }
 
-/** A realistic hot listing: ~25 posts, a few fast movers, the rest crawling. */
-function seedListing(rng: () => number, now: number): HotPost[] {
+/**
+ * A realistic hot listing: ~25 posts, a few fast movers, the rest crawling. When
+ * `aged`, every post predates the 12h New window (the condition that used to drain
+ * the `new` rule as posts aged out of the window).
+ */
+function seedListing(rng: () => number, now: number, aged = false): HotPost[] {
   const posts: HotPost[] = [];
   for (let i = 0; i < 25; i++) {
     const fast = rng() < 0.15;
     const rate = fast ? 200 + rng() * 800 : 2 + rng() * 30;
-    const ageH = rng() * 20;
+    const ageH = aged ? 13 + rng() * 20 : rng() * 20;
     const score = Math.max(1, Math.round(rate * ageH * 60 * (0.3 + rng())));
     posts.push(post(`t3_${i}`, now - ageH * 3_600_000, score, rate));
   }
@@ -99,11 +103,18 @@ describe("PollingOfficeDataSource - stays full on heavy-tailed live data", () =>
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it.each(["blend", "momentum"] as const)(
-    "keeps the cubicle full across many polls (%s sourcing)",
-    async (sourcing) => {
+  it.each([
+    ["blend", false],
+    ["momentum", false],
+    ["new", false],
+    // `new` on a listing that has entirely aged out of the 12h window: must still
+    // stay full by backfilling the newest posts, not drain.
+    ["new", true],
+  ] as const)(
+    "keeps the cubicle full across many polls (%s sourcing, aged=%s)",
+    async (sourcing, aged) => {
       const rng = mulberry32(42);
-      const posts = seedListing(rng, Date.now());
+      const posts = seedListing(rng, Date.now(), aged);
 
       const fetchPayload = vi.fn(async (): Promise<DemoOfficePayload> => {
         advanceListing(posts, rng);

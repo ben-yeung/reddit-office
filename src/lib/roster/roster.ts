@@ -5,7 +5,7 @@
  * cubicle's bounded Roster under the Office Policy sourcing rule, then place them
  * in seats. Each sourcing rule is self-contained (ADR-0005, revised):
  *
- * - "new":      only posts created within `newWindowMs`, newest first.
+ * - "new":      the newest posts, newest first (in-window first, then backfilled).
  * - "momentum": the highest-Momentum posts (desc), up to `maxSize`.
  * - "blend":    a few top-Momentum leaders + the rest new-and-surging, deduped
  *               and backfilled from Momentum so the cubicle stays full.
@@ -118,10 +118,14 @@ export function selectRoster<T extends RosterCandidate>(
 ): T[] {
   switch (sourcing) {
     case "new":
-      return candidates
-        .filter((c) => isFresh(c, now, cfg.newWindowMs))
-        .sort(byNewest)
-        .slice(0, cfg.maxSize);
+      // The newest posts, best-first, filled to maxSize. The New window still
+      // marks what counts as genuinely "fresh" (Blended's fresh-and-surging pool,
+      // new-post events), but it no longer gates occupancy here: sorting by recency
+      // puts in-window posts first and then backfills with the next-newest, so a
+      // sub whose posts have aged past the window keeps a full cubicle instead of
+      // draining over a session. Only a sub with fewer than maxSize live posts
+      // shows fewer.
+      return candidates.slice().sort(byNewest).slice(0, cfg.maxSize);
     case "momentum":
       // The most-alive posts, best first. No absolute floor: a quiet sub still
       // shows its liveliest posts rather than emptying (ADR-0005 - "niche
